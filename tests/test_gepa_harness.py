@@ -92,6 +92,13 @@ def test_reproduction_defaults_are_exact_and_secret_free(config_module):
     }
 
 
+def test_launcher_requires_the_locked_example_environment():
+    launcher = (EXAMPLE_DIR / "run.sh").read_text(encoding="utf-8")
+
+    assert "uv run" in launcher
+    assert "--locked" in launcher
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [

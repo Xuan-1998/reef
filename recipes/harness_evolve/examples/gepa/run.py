@@ -19,7 +19,7 @@ from gepa.adapters.default_adapter.default_adapter import DefaultAdapter, Evalua
 from harness.adapter import MULTI_NODE_COMPONENTS, ReefCompositionAdapter, ReefRulesAdapter, score_aime_answer
 from harness.budget import ObservedCostLedger
 from harness.callbacks import EvidenceCallback
-from harness.config import AIME_SPLIT_SIZES, GEPA_COMMIT, PI_VERSION, ExperimentConfig
+from harness.config import AIME_SPLIT_SIZES, GEPA_COMMIT, PI_VERSION, REEF_COMMIT, ExperimentConfig
 from harness.data import RULES_SEED, load_aime_splits, multi_node_seed, rules_seed
 from harness.models import REFLECTION_MODEL_PRICE, TASK_MODEL_PRICE, TrackedChatModel
 from harness.publication import publish_candidate
@@ -29,6 +29,7 @@ from reef.harness.adapters import get_adapter
 from reef.harness.model_binding import ModelBinding
 
 HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parents[3]
 CELLS = ("reference", "frozen", "rules", "multi")
 
 
@@ -64,6 +65,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = ExperimentConfig(max_metric_calls=args.budget, seeds=tuple(args.seeds))
+    reef_source = verify_reef_pin()
     verify_gepa_pin()
     selected_cells = CELLS if args.cell == "all" else (args.cell,)
     if any(cell != "reference" for cell in selected_cells):
@@ -79,6 +81,13 @@ def main() -> None:
         "reflection_model": config.reflection_model,
         "api_key_env": config.api_key_env,
         "max_observed_cost_usd": args.max_observed_cost_usd,
+        "pins": {
+            "reef_base_commit": REEF_COMMIT,
+            "reef_source_commit": reef_source["commit"],
+            "reef_source_dirty": reef_source["dirty"],
+            "gepa_commit": GEPA_COMMIT,
+            "pi_version": PI_VERSION if any(cell != "reference" for cell in selected_cells) else None,
+        },
         "smoke": args.smoke,
         "planned_task_evaluations": planned_task_evaluations(
             selected_cells,
@@ -93,6 +102,8 @@ def main() -> None:
 
     if args.max_observed_cost_usd is None or args.max_observed_cost_usd <= 0:
         raise SystemExit("--max-observed-cost-usd must be positive for a live run; no model calls were made")
+    if reef_source["dirty"]:
+        raise SystemExit("tracked Reef source has uncommitted changes; no model calls were made")
     api_key = os.environ.get(config.api_key_env, "").strip()
     if not api_key:
         raise SystemExit(f"{config.api_key_env} is not set; no live model calls were made")
@@ -309,6 +320,21 @@ def verify_gepa_pin() -> None:
         raise SystemExit(f"GEPA commit is {installed!r}, expected {GEPA_COMMIT}")
 
 
+def verify_reef_pin() -> dict[str, Any]:
+    commit = _command_output(["git", "rev-parse", "HEAD"])
+    dirty = bool(_command_output(["git", "status", "--porcelain", "--untracked-files=no"]))
+    base_ok = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", REEF_COMMIT, "HEAD"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    ).returncode
+    if base_ok != 0:
+        raise SystemExit(f"current Reef source does not descend from pinned base {REEF_COMMIT}")
+    return {"commit": commit, "dirty": dirty}
+
+
 def verify_pi_pin(binary: str) -> None:
     resolved = shutil.which(binary) if not Path(binary).is_absolute() else binary
     if not resolved:
@@ -317,6 +343,20 @@ def verify_pi_pin(binary: str) -> None:
     installed = completed.stdout.strip()
     if installed != PI_VERSION:
         raise SystemExit(f"Pi version is {installed!r}, expected {PI_VERSION}")
+
+
+def _command_output(command: list[str]) -> str:
+    try:
+        return subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SystemExit(f"runtime check failed for {command[0]!r}: {exc}") from exc
 
 
 def write_dataset_manifest(path: Path, trainset, valset, testset) -> None:

@@ -7,6 +7,7 @@ UV_PROJECT_ENVIRONMENT="$ROOT/.venv-gepa"
 export UV_PROJECT_ENVIRONMENT
 
 exec uv run \
+  --locked \
   --project "$HERE" \
   --extra reference \
   --with-editable "$ROOT" \

@@ -43,16 +43,19 @@ nodes. Those are separate safety and search-space questions.
 
 ## Setup
 
-The launcher creates an isolated Python environment, installs GEPA from the
-exact Git commit, and installs the current Reef checkout as editable:
+The launcher creates an isolated Python environment from `uv.lock`, installs
+GEPA from the exact Git commit, and installs the current Reef checkout as
+editable:
 
 ```bash
 ./run.sh --cell reference --dry-run
 ```
 
 Install Pi `0.84.2` and either put it on `PATH` or set
-`REEF_PI_BINARY` to its absolute path. A dry run of every cell validates both
-source pins and the Pi version without loading the dataset or calling a model:
+`REEF_PI_BINARY` to its absolute path. A dry run of every cell verifies that
+the current Reef source descends from the pinned base, records its exact commit
+and tracked-dirty state, validates the GEPA source pin and Pi version, and does
+not load the dataset or call a model:
 
 ```bash
 REEF_PI_BINARY=/path/to/pi ./run.sh --dry-run
