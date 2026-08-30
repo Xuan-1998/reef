@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
 from reef.harness.model_binding import ModelBinding, ModelBindingError
@@ -65,10 +69,29 @@ REFLECTION_MODEL_PRICE = ModelPrice(
 class UsageLedger:
     """Thread-safe token totals for model calls made outside Pi."""
 
-    def __init__(self, price: ModelPrice) -> None:
+    def __init__(self, price: ModelPrice, path: Path | None = None) -> None:
         self.price = price
+        self.path = Path(path).resolve() if path is not None else None
         self._usage: TokenUsage = empty_usage()
         self._lock = threading.Lock()
+        if self.path is not None and self.path.is_file():
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(value, Mapping) or value.get("pricing") != asdict(price):
+                raise ValueError(f"usage ledger has invalid or mismatched pricing: {self.path}")
+            usage = value.get("usage")
+            if not isinstance(usage, Mapping):
+                raise ValueError(f"usage ledger has no usage object: {self.path}")
+            loaded = empty_usage()
+            if set(usage) != set(loaded):
+                raise ValueError(f"usage ledger has unexpected token fields: {self.path}")
+            for key in loaded:
+                raw_count = usage[key]
+                if not isinstance(raw_count, int) or raw_count < 0:
+                    raise ValueError(f"usage ledger has invalid token counts: {self.path}")
+                loaded[key] = raw_count
+            self._usage = loaded
+        elif self.path is not None:
+            self._persist_locked()
 
     def add_openai_response(self, response: Mapping[str, Any]) -> TokenUsage:
         usage = empty_usage()
@@ -91,7 +114,11 @@ class UsageLedger:
     def add(self, usage: Mapping[str, int]) -> None:
         with self._lock:
             for key in self._usage:
-                self._usage[key] += int(usage.get(key, 0))
+                increment = int(usage.get(key, 0))
+                if increment < 0:
+                    raise ValueError("token usage increments must be non-negative")
+                self._usage[key] += increment
+            self._persist_locked()
 
     def snapshot(self) -> TokenUsage:
         with self._lock:
@@ -109,13 +136,39 @@ class UsageLedger:
     def total_tokens_out(self) -> int:
         return self.snapshot()["output_tokens"]
 
+    def _persist_locked(self) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.", dir=self.path.parent)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"schema_version": 1, "pricing": asdict(self.price), "usage": self._usage},
+                    handle,
+                    indent=2,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+            os.replace(temporary, self.path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
 
 class TrackedChatModel:
     """A GEPA-compatible callable backed by Reef's model binding."""
 
-    def __init__(self, binding: ModelBinding, *, price: ModelPrice, spend_guard: CostGuard | None = None) -> None:
+    def __init__(
+        self,
+        binding: ModelBinding,
+        *,
+        price: ModelPrice,
+        spend_guard: CostGuard | None = None,
+        usage_path: Path | None = None,
+    ) -> None:
         self.binding = binding
-        self.usage = UsageLedger(price)
+        self.usage = UsageLedger(price, usage_path)
         self._spend_guard = spend_guard
 
     def __call__(self, prompt: str | list[dict[str, Any]]) -> str:

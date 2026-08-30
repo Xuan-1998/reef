@@ -101,6 +101,9 @@ budget remains the authoritative hard ceiling.
 
 Reusing the same explicit output directory resumes GEPA checkpoints and skips
 cells that already have a `done.json` marker.
+Task and reflection token totals are also written after every completed call
+to each cell's `task-usage.json` and `reflection-usage.json`, so reports include
+calls completed before a restart rather than only the final process's usage.
 
 ## Retained results
 

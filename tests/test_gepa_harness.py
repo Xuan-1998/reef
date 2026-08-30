@@ -589,6 +589,26 @@ def test_tracked_chat_model_retains_api_usage_without_serializing_a_key(models_m
     assert guard.costs == [pytest.approx(models_module.REFLECTION_MODEL_PRICE.estimate(model.usage.snapshot()))]
 
 
+def test_usage_ledger_persists_tokens_and_rejects_pricing_drift(models_module, tmp_path):
+    path = tmp_path / "task-usage.json"
+    usage = {
+        "requests": 1,
+        "input_tokens": 10,
+        "cached_input_tokens": 3,
+        "output_tokens": 4,
+        "reasoning_tokens": 2,
+    }
+    ledger = models_module.UsageLedger(models_module.TASK_MODEL_PRICE, path)
+    ledger.add(usage)
+
+    resumed = models_module.UsageLedger(models_module.TASK_MODEL_PRICE, path)
+
+    assert resumed.snapshot() == usage
+    assert resumed.total_cost == pytest.approx(models_module.TASK_MODEL_PRICE.estimate(usage))
+    with pytest.raises(ValueError, match="mismatched pricing"):
+        models_module.UsageLedger(models_module.REFLECTION_MODEL_PRICE, path)
+
+
 def test_observed_cost_ledger_persists_and_stops_before_the_next_call(budget_module, tmp_path):
     path = tmp_path / "observed-cost.json"
     ledger = budget_module.ObservedCostLedger(path, 1.0)

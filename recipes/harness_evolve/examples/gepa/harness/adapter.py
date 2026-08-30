@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TypedDict
 
 from gepa.core.adapter import EvaluationBatch
@@ -119,6 +120,7 @@ class ReefCompositionAdapter:
         timeout_s: float = 600.0,
         episode_runner: EpisodeRunner = run_episode,
         spend_guard: CostGuard | None = None,
+        usage_path: Path | None = None,
     ) -> None:
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
@@ -136,7 +138,7 @@ class ReefCompositionAdapter:
         self._episode_runner = episode_runner
         self._spend_guard = spend_guard
         self._binding_nodes = task_model.compose_nodes(descriptor)
-        self.usage = UsageLedger(TASK_MODEL_PRICE)
+        self.usage = UsageLedger(TASK_MODEL_PRICE, usage_path)
 
     def candidate_nodes(self, candidate: Mapping[str, str]) -> tuple[tuple[str, Mapping[str, Any]], ...]:
         """Map a GEPA candidate to Reef nodes without mutating either input."""

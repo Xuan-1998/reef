@@ -153,11 +153,13 @@ def run_reference(config, trainset, valset, testset, budget, seed, output_dir, a
         ModelBinding(config.base_url, config.task_model, api_key=api_key),
         price=TASK_MODEL_PRICE,
         spend_guard=ledger,
+        usage_path=output_dir / "task-usage.json",
     )
     reflection = TrackedChatModel(
         ModelBinding(config.base_url, config.reflection_model, api_key=api_key),
         price=REFLECTION_MODEL_PRICE,
         spend_guard=ledger,
+        usage_path=output_dir / "reflection-usage.json",
     )
     adapter = DefaultAdapter(model=task, evaluator=ExactAIMEEvaluator())
     callback = EvidenceCallback(output_dir / "events.jsonl")
@@ -194,6 +196,7 @@ def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger) ->
         components=MULTI_NODE_COMPONENTS,
         binary=pi_binary,
         spend_guard=ledger,
+        usage_path=output_dir / "task-usage.json",
     )
     candidate = multi_node_seed()
     started = datetime.now(timezone.utc)
@@ -231,7 +234,11 @@ def run_reef_search(
     binding = ModelBinding(config.base_url, config.task_model, api_key=api_key)
     if cell == "rules":
         adapter = ReefRulesAdapter(
-            descriptor=get_adapter("pi"), task_model=binding, binary=pi_binary, spend_guard=ledger
+            descriptor=get_adapter("pi"),
+            task_model=binding,
+            binary=pi_binary,
+            spend_guard=ledger,
+            usage_path=output_dir / "task-usage.json",
         )
         candidate = rules_seed()
     else:
@@ -241,12 +248,14 @@ def run_reef_search(
             components=MULTI_NODE_COMPONENTS,
             binary=pi_binary,
             spend_guard=ledger,
+            usage_path=output_dir / "task-usage.json",
         )
         candidate = multi_node_seed()
     reflection = TrackedChatModel(
         ModelBinding(config.base_url, config.reflection_model, api_key=api_key),
         price=REFLECTION_MODEL_PRICE,
         spend_guard=ledger,
+        usage_path=output_dir / "reflection-usage.json",
     )
     callback = EvidenceCallback(output_dir / "events.jsonl")
     outcome = run_sealed_search(
