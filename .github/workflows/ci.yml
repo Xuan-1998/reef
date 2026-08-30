@@ -74,6 +74,13 @@ jobs:
       # OPD teacher-client tests, and ray for the slime bridge suites; keeping
       # them here avoids expanding Reef's minimal service dependencies.
       - run: python -m pip install pytest pytest-cov aiohttp pyyaml huggingface_hub numpy ray httpx
+      # The GEPA reproduction is an example-local project rather than a Reef
+      # wheel dependency. Its deterministic contract suite still runs in the
+      # directory-driven core test job, so install the exact upstream pin it
+      # exercises without adding it to Reef's package metadata.
+      - run: >
+          python -m pip install
+          "gepa @ git+https://github.com/gepa-ai/gepa.git@92dadfffbe98c8ecf508179a1cab09c1bb85cd32"
       # Install the pinned training runtime without its GPU dependencies: the
       # tests need it importable, not its GPU stack, and the
       # full requirements pull CUDA torch and the nvidia wheels, which
