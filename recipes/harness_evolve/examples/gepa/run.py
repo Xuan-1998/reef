@@ -21,6 +21,7 @@ from harness.budget import ObservedCostLedger
 from harness.callbacks import EvidenceCallback
 from harness.config import AIME_SPLIT_SIZES, GEPA_COMMIT, PI_VERSION, REEF_COMMIT, ExperimentConfig
 from harness.data import RULES_SEED, load_aime_splits, multi_node_seed, rules_seed
+from harness.heldout import CheckpointedHeldoutEvaluator
 from harness.models import REFLECTION_MODEL_PRICE, TASK_MODEL_PRICE, TrackedChatModel
 from harness.publication import publish_candidate
 from harness.reporting import write_aggregate_report, write_search_report
@@ -120,7 +121,7 @@ def main() -> None:
     for cell in selected_cells:
         for seed in config.seeds:
             cell_dir = output_root / cell / f"seed-{seed}"
-            cell_dir.mkdir(parents=True)
+            cell_dir.mkdir(parents=True, exist_ok=True)
             if (cell_dir / "done.json").exists():
                 print(f"skip completed cell {cell} seed {seed}: {cell_dir}")
                 continue
@@ -174,6 +175,7 @@ def run_reference(config, trainset, valset, testset, budget, seed, output_dir, a
         seed=seed,
         run_dir=output_dir / "search",
         callbacks=[callback],
+        heldout_evaluator=CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints"),
     )
     write_search_report(
         output_dir=output_dir,
@@ -200,7 +202,9 @@ def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger) ->
     )
     candidate = multi_node_seed()
     started = datetime.now(timezone.utc)
-    evaluated = adapter.evaluate(list(testset), candidate, capture_traces=False)
+    evaluated = CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints").evaluate(
+        "frozen", testset, candidate
+    )
     score = sum(evaluated.scores) / len(evaluated.scores)
     usage = adapter.usage.snapshot()
     summary = {
@@ -269,6 +273,7 @@ def run_reef_search(
         seed=seed,
         run_dir=output_dir / "search",
         callbacks=[callback],
+        heldout_evaluator=CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints"),
     )
     write_search_report(
         output_dir=output_dir,

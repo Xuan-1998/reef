@@ -56,6 +56,14 @@ def budget_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.fixture
+def heldout_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
+    for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
+        del sys.modules[name]
+    return importlib.import_module("harness.heldout")
+
+
+@pytest.fixture
 def publication_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
     for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
@@ -401,6 +409,49 @@ def test_pinned_gepa_checkpoint_resumes_without_replaying_work(search_module, tm
     assert resumed.candidates == first.candidates
     assert resumed.parents == first.parents
     assert resumed.total_metric_calls == first.total_metric_calls
+
+
+def test_heldout_checkpoint_resumes_without_repeating_completed_examples(heldout_module, tmp_path):
+    from gepa.core.adapter import EvaluationBatch
+
+    calls = []
+
+    class InterruptingAdapter:
+        interrupted = False
+
+        def evaluate(self, batch, candidate, capture_traces=False):
+            assert len(batch) == 1
+            assert capture_traces is False
+            calls.append(batch[0]["input"])
+            if batch[0]["input"] == "two" and not self.interrupted:
+                self.interrupted = True
+                raise RuntimeError("simulated interruption")
+            return EvaluationBatch(
+                outputs=[{"candidate": candidate["rules"], "input": batch[0]["input"]}],
+                scores=[float(batch[0]["answer"])],
+                num_metric_calls=1,
+            )
+
+    batch = [
+        {"input": "one", "answer": "1"},
+        {"input": "two", "answer": "0"},
+        {"input": "three", "answer": "1"},
+    ]
+    evaluator = heldout_module.CheckpointedHeldoutEvaluator(InterruptingAdapter(), tmp_path / "checkpoints")
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        evaluator.evaluate("selected", batch, {"rules": "candidate"})
+    assert calls == ["one", "two"]
+
+    resumed = evaluator.evaluate("selected", batch, {"rules": "candidate"})
+
+    assert calls == ["one", "two", "two", "three"]
+    assert resumed.scores == [1.0, 0.0, 1.0]
+    assert resumed.num_metric_calls == 3
+    assert evaluator.evaluate("selected", batch, {"rules": "candidate"}).scores == resumed.scores
+    assert calls == ["one", "two", "two", "three"]
+    with pytest.raises(RuntimeError, match="identity changed"):
+        evaluator.evaluate("selected", batch, {"rules": "different candidate"})
 
 
 def test_multi_node_candidate_renders_rules_and_skill_as_one_composition(adapter_module):

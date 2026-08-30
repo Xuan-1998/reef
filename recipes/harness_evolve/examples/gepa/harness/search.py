@@ -14,6 +14,7 @@ from gepa.core.adapter import GEPAAdapter
 from gepa.core.result import GEPAResult
 
 from .adapter import AIMEExample, HarnessRollout, HarnessTrajectory
+from .heldout import HeldoutEvaluator
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ def run_sealed_search(
     module_selector: str = "round_robin",
     custom_candidate_proposer: Callable[..., dict[str, str]] | None = None,
     callbacks: list[Any] | None = None,
+    heldout_evaluator: HeldoutEvaluator | None = None,
 ) -> SealedSearchOutcome:
     """Run upstream GEPA, gate on validation, then and only then touch test.
 
@@ -124,8 +126,12 @@ def run_sealed_search(
     promotion = decide_promotion(result)
     selected_candidate = result.candidates[promotion.candidate_idx]
 
-    frozen = adapter.evaluate(list(testset), dict(seed_candidate), capture_traces=False)
-    selected = adapter.evaluate(list(testset), dict(selected_candidate), capture_traces=False)
+    if heldout_evaluator is None:
+        frozen = adapter.evaluate(list(testset), dict(seed_candidate), capture_traces=False)
+        selected = adapter.evaluate(list(testset), dict(selected_candidate), capture_traces=False)
+    else:
+        frozen = heldout_evaluator.evaluate("frozen", testset, seed_candidate)
+        selected = heldout_evaluator.evaluate("selected", testset, selected_candidate)
     return SealedSearchOutcome(
         result=result,
         promotion=promotion,

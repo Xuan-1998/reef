@@ -104,6 +104,11 @@ cells that already have a `done.json` marker.
 Task and reflection token totals are also written after every completed call
 to each cell's `task-usage.json` and `reflection-usage.json`, so reports include
 calls completed before a restart rather than only the final process's usage.
+Held-out evaluations write one atomic result per example under each cell's
+`heldout-checkpoints/` directory. A restart skips completed examples in both
+the frozen and selected batches. A process failure after a provider call
+finishes but before its checkpoint is written can still repeat that one call,
+so the account-side project budget remains necessary.
 
 ## Retained results
 
@@ -113,6 +118,7 @@ Each search cell retains:
 - GEPA's checkpoint and run log;
 - reflection, proposal, acceptance, budget, and Pareto events as JSONL;
 - candidates, parents, per-instance fronts, raw held-out outputs, and scores;
+- per-example held-out checkpoints for interruption-safe resume;
 - score versus metric-call budget and a Graphviz parent graph;
 - task/reflection token usage, wall time, and an estimated USD cost using the
   price snapshot recorded in the report; and
