@@ -17,6 +17,7 @@ from typing import Any
 from gepa.adapters.default_adapter.default_adapter import DefaultAdapter, EvaluationResult
 
 from harness.adapter import MULTI_NODE_COMPONENTS, ReefCompositionAdapter, ReefRulesAdapter, score_aime_answer
+from harness.budget import ObservedCostLedger
 from harness.callbacks import EvidenceCallback
 from harness.config import AIME_SPLIT_SIZES, GEPA_COMMIT, PI_VERSION, ExperimentConfig
 from harness.data import RULES_SEED, load_aime_splits, multi_node_seed, rules_seed
@@ -49,6 +50,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--budget", type=int, default=ExperimentConfig().max_metric_calls)
     parser.add_argument("--pi-binary", default=os.environ.get("REEF_PI_BINARY", "pi"))
     parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument(
+        "--max-observed-cost-usd",
+        type=float,
+        default=None,
+        help="Required for live runs; stops before a new call after recorded cost reaches this value",
+    )
     parser.add_argument("--smoke", action="store_true", help="Use two examples per split and an eight-call budget")
     parser.add_argument("--dry-run", action="store_true", help="Validate pins and print the plan without model calls")
     return parser.parse_args()
@@ -71,6 +78,7 @@ def main() -> None:
         "task_model": config.task_model,
         "reflection_model": config.reflection_model,
         "api_key_env": config.api_key_env,
+        "max_observed_cost_usd": args.max_observed_cost_usd,
         "smoke": args.smoke,
         "planned_task_evaluations": planned_task_evaluations(
             selected_cells,
@@ -83,6 +91,8 @@ def main() -> None:
         print(json.dumps(plan, indent=2, sort_keys=True))
         return
 
+    if args.max_observed_cost_usd is None or args.max_observed_cost_usd <= 0:
+        raise SystemExit("--max-observed-cost-usd must be positive for a live run; no model calls were made")
     api_key = os.environ.get(config.api_key_env, "").strip()
     if not api_key:
         raise SystemExit(f"{config.api_key_env} is not set; no live model calls were made")
@@ -93,6 +103,7 @@ def main() -> None:
         budget = 8
 
     output_root.mkdir(parents=True, exist_ok=True)
+    ledger = ObservedCostLedger(output_root / "observed-cost.json", args.max_observed_cost_usd)
     (output_root / "plan.json").write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_dataset_manifest(output_root / "dataset-manifest.json", trainset, valset, testset)
     for cell in selected_cells:
@@ -103,12 +114,22 @@ def main() -> None:
                 print(f"skip completed cell {cell} seed {seed}: {cell_dir}")
                 continue
             if cell == "reference":
-                run_reference(config, trainset, valset, testset, budget, seed, cell_dir, api_key)
+                run_reference(config, trainset, valset, testset, budget, seed, cell_dir, api_key, ledger)
             elif cell == "frozen":
-                run_frozen(config, testset, seed, cell_dir, api_key, args.pi_binary)
+                run_frozen(config, testset, seed, cell_dir, api_key, args.pi_binary, ledger)
             else:
                 run_reef_search(
-                    config, trainset, valset, testset, budget, seed, cell_dir, api_key, args.pi_binary, cell
+                    config,
+                    trainset,
+                    valset,
+                    testset,
+                    budget,
+                    seed,
+                    cell_dir,
+                    api_key,
+                    args.pi_binary,
+                    cell,
+                    ledger,
                 )
     # Full examples (including held-out answers) are retained only after every
     # requested search cell has finished or was already marked complete.
@@ -116,14 +137,16 @@ def main() -> None:
     write_aggregate_report(output_dir=output_root, cells=selected_cells, seeds=config.seeds)
 
 
-def run_reference(config, trainset, valset, testset, budget, seed, output_dir, api_key) -> None:
+def run_reference(config, trainset, valset, testset, budget, seed, output_dir, api_key, ledger) -> None:
     task = TrackedChatModel(
         ModelBinding(config.base_url, config.task_model, api_key=api_key),
         price=TASK_MODEL_PRICE,
+        spend_guard=ledger,
     )
     reflection = TrackedChatModel(
         ModelBinding(config.base_url, config.reflection_model, api_key=api_key),
         price=REFLECTION_MODEL_PRICE,
+        spend_guard=ledger,
     )
     adapter = DefaultAdapter(model=task, evaluator=ExactAIMEEvaluator())
     callback = EvidenceCallback(output_dir / "events.jsonl")
@@ -153,12 +176,13 @@ def run_reference(config, trainset, valset, testset, budget, seed, output_dir, a
     mark_done(output_dir)
 
 
-def run_frozen(config, testset, seed, output_dir, api_key, pi_binary) -> None:
+def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger) -> None:
     adapter = ReefCompositionAdapter(
         descriptor=get_adapter("pi"),
         task_model=ModelBinding(config.base_url, config.task_model, api_key=api_key),
         components=MULTI_NODE_COMPONENTS,
         binary=pi_binary,
+        spend_guard=ledger,
     )
     candidate = multi_node_seed()
     started = datetime.now(timezone.utc)
@@ -190,10 +214,14 @@ def run_frozen(config, testset, seed, output_dir, api_key, pi_binary) -> None:
     mark_done(output_dir)
 
 
-def run_reef_search(config, trainset, valset, testset, budget, seed, output_dir, api_key, pi_binary, cell) -> None:
+def run_reef_search(
+    config, trainset, valset, testset, budget, seed, output_dir, api_key, pi_binary, cell, ledger
+) -> None:
     binding = ModelBinding(config.base_url, config.task_model, api_key=api_key)
     if cell == "rules":
-        adapter = ReefRulesAdapter(descriptor=get_adapter("pi"), task_model=binding, binary=pi_binary)
+        adapter = ReefRulesAdapter(
+            descriptor=get_adapter("pi"), task_model=binding, binary=pi_binary, spend_guard=ledger
+        )
         candidate = rules_seed()
     else:
         adapter = ReefCompositionAdapter(
@@ -201,11 +229,13 @@ def run_reef_search(config, trainset, valset, testset, budget, seed, output_dir,
             task_model=binding,
             components=MULTI_NODE_COMPONENTS,
             binary=pi_binary,
+            spend_guard=ledger,
         )
         candidate = multi_node_seed()
     reflection = TrackedChatModel(
         ModelBinding(config.base_url, config.reflection_model, api_key=api_key),
         price=REFLECTION_MODEL_PRICE,
+        spend_guard=ledger,
     )
     callback = EvidenceCallback(output_dir / "events.jsonl")
     outcome = run_sealed_search(

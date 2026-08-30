@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from reef.harness.model_binding import ModelBinding, ModelBindingError
 
@@ -16,6 +16,14 @@ class TokenUsage(TypedDict):
     cached_input_tokens: int
     output_tokens: int
     reasoning_tokens: int
+
+
+class CostGuard(Protocol):
+    """Minimal boundary shared by direct model calls and Pi episodes."""
+
+    def before_call(self) -> None: ...
+
+    def record_call(self, observed_cost_usd: float) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -62,25 +70,23 @@ class UsageLedger:
         self._usage: TokenUsage = empty_usage()
         self._lock = threading.Lock()
 
-    def add_openai_response(self, response: Mapping[str, Any]) -> None:
+    def add_openai_response(self, response: Mapping[str, Any]) -> TokenUsage:
+        usage = empty_usage()
+        usage["requests"] = 1
         raw = response.get("usage")
-        if not isinstance(raw, Mapping):
-            return
-        input_tokens = _integer(raw.get("prompt_tokens", raw.get("input_tokens", 0)))
-        output_tokens = _integer(raw.get("completion_tokens", raw.get("output_tokens", 0)))
-        input_details = raw.get("prompt_tokens_details", raw.get("input_tokens_details", {}))
-        output_details = raw.get("completion_tokens_details", raw.get("output_tokens_details", {}))
-        cached = _integer(input_details.get("cached_tokens", 0)) if isinstance(input_details, Mapping) else 0
-        reasoning = _integer(output_details.get("reasoning_tokens", 0)) if isinstance(output_details, Mapping) else 0
-        self.add(
-            {
-                "requests": 1,
-                "input_tokens": input_tokens,
-                "cached_input_tokens": cached,
-                "output_tokens": output_tokens,
-                "reasoning_tokens": reasoning,
-            }
-        )
+        if isinstance(raw, Mapping):
+            input_details = raw.get("prompt_tokens_details", raw.get("input_tokens_details", {}))
+            output_details = raw.get("completion_tokens_details", raw.get("output_tokens_details", {}))
+            usage["input_tokens"] = _integer(raw.get("prompt_tokens", raw.get("input_tokens", 0)))
+            usage["cached_input_tokens"] = (
+                _integer(input_details.get("cached_tokens", 0)) if isinstance(input_details, Mapping) else 0
+            )
+            usage["output_tokens"] = _integer(raw.get("completion_tokens", raw.get("output_tokens", 0)))
+            usage["reasoning_tokens"] = (
+                _integer(output_details.get("reasoning_tokens", 0)) if isinstance(output_details, Mapping) else 0
+            )
+        self.add(usage)
+        return usage
 
     def add(self, usage: Mapping[str, int]) -> None:
         with self._lock:
@@ -107,14 +113,19 @@ class UsageLedger:
 class TrackedChatModel:
     """A GEPA-compatible callable backed by Reef's model binding."""
 
-    def __init__(self, binding: ModelBinding, *, price: ModelPrice) -> None:
+    def __init__(self, binding: ModelBinding, *, price: ModelPrice, spend_guard: CostGuard | None = None) -> None:
         self.binding = binding
         self.usage = UsageLedger(price)
+        self._spend_guard = spend_guard
 
     def __call__(self, prompt: str | list[dict[str, Any]]) -> str:
         messages = [{"role": "user", "content": prompt}] if isinstance(prompt, str) else prompt
+        if self._spend_guard is not None:
+            self._spend_guard.before_call()
         response = self.binding.complete({"messages": messages})
-        self.usage.add_openai_response(response)
+        usage = self.usage.add_openai_response(response)
+        if self._spend_guard is not None:
+            self._spend_guard.record_call(self.usage.price.estimate(usage))
         try:
             content = response["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:

@@ -48,6 +48,14 @@ def models_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.fixture
+def budget_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
+    for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
+        del sys.modules[name]
+    return importlib.import_module("harness.budget")
+
+
+@pytest.fixture
 def publication_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
     for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
@@ -104,6 +112,16 @@ def test_rules_adapter_renders_binding_and_scores_a_realistic_pi_trace(adapter_m
 
     calls = []
 
+    class Guard:
+        def __init__(self):
+            self.events = []
+
+        def before_call(self):
+            self.events.append("before")
+
+        def record_call(self, observed_cost_usd):
+            self.events.append(("record", observed_cost_usd))
+
     def run(descriptor, files, prompt, **kwargs):
         calls.append((descriptor, files, prompt, kwargs))
         return EpisodeResult(
@@ -122,11 +140,13 @@ def test_rules_adapter_renders_binding_and_scores_a_realistic_pi_trace(adapter_m
         )
 
     binding = ModelBinding("http://model.test", "task-model", api_key="dummy")
+    guard = Guard()
     adapter = adapter_module.ReefRulesAdapter(
         descriptor=get_adapter("pi"),
         task_model=binding,
         binary="fake-pi",
         episode_runner=run,
+        spend_guard=guard,
     )
 
     evaluated = adapter.evaluate(
@@ -147,6 +167,7 @@ def test_rules_adapter_renders_binding_and_scores_a_realistic_pi_trace(adapter_m
     models = json.loads(files["pi-agent/models.json"])
     assert models["providers"]["reef"]["baseUrl"] == "http://model.test/v1"
     assert models["providers"]["reef"]["models"] == [{"id": "task-model"}]
+    assert guard.events == ["before", ("record", 0.0)]
 
 
 def test_rules_adapter_builds_component_specific_reflection_records(adapter_module):
@@ -522,6 +543,17 @@ def test_pi_usage_and_price_estimate_include_cached_and_reasoning_tokens(models_
 
 
 def test_tracked_chat_model_retains_api_usage_without_serializing_a_key(models_module):
+    class Guard:
+        def __init__(self):
+            self.before = 0
+            self.costs = []
+
+        def before_call(self):
+            self.before += 1
+
+        def record_call(self, observed_cost_usd):
+            self.costs.append(observed_cost_usd)
+
     class Binding:
         def complete(self, body):
             assert body == {"messages": [{"role": "user", "content": "prompt"}]}
@@ -535,7 +567,8 @@ def test_tracked_chat_model_retains_api_usage_without_serializing_a_key(models_m
                 },
             }
 
-    model = models_module.TrackedChatModel(Binding(), price=models_module.REFLECTION_MODEL_PRICE)
+    guard = Guard()
+    model = models_module.TrackedChatModel(Binding(), price=models_module.REFLECTION_MODEL_PRICE, spend_guard=guard)
 
     assert model("prompt") == "answer"
     assert model.usage.snapshot() == {
@@ -545,6 +578,24 @@ def test_tracked_chat_model_retains_api_usage_without_serializing_a_key(models_m
         "output_tokens": 4,
         "reasoning_tokens": 2,
     }
+    assert guard.before == 1
+    assert guard.costs == [pytest.approx(models_module.REFLECTION_MODEL_PRICE.estimate(model.usage.snapshot()))]
+
+
+def test_observed_cost_ledger_persists_and_stops_before_the_next_call(budget_module, tmp_path):
+    path = tmp_path / "observed-cost.json"
+    ledger = budget_module.ObservedCostLedger(path, 1.0)
+
+    ledger.before_call()
+    ledger.record_call(0.6)
+    resumed = budget_module.ObservedCostLedger(path, 1.0)
+    resumed.before_call()
+    resumed.record_call(0.5)
+
+    assert resumed.observed_cost_usd == pytest.approx(1.1)
+    assert resumed.completed_calls == 2
+    with pytest.raises(budget_module.SpendCapReached, match="no new model call"):
+        resumed.before_call()
 
 
 def test_publication_uses_reef_versions_and_excludes_transient_model_binding(

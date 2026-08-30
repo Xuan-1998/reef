@@ -69,7 +69,8 @@ Run one cheap, non-authoritative plumbing check first:
 
 ```bash
 OPENAI_API_KEY=... REEF_PI_BINARY=/path/to/pi \
-  ./run.sh --cell multi --seeds 0 --smoke --output-dir outputs/smoke
+  ./run.sh --cell multi --seeds 0 --smoke \
+  --max-observed-cost-usd 5 --output-dir outputs/smoke
 ```
 
 Run the exact four-cell reproduction only after setting an account-side spend
@@ -77,14 +78,23 @@ limit and reviewing the projected budget:
 
 ```bash
 OPENAI_API_KEY=... REEF_PI_BINARY=/path/to/pi \
-  ./run.sh --cell all --seeds 0 1 2 --budget 150 --output-dir outputs/full
+  ./run.sh --cell all --seeds 0 1 2 --budget 150 \
+  --max-observed-cost-usd 100 --output-dir outputs/full
 ```
 
 The exact command schedules about 4,500 task-model evaluations: each search
 cell spends 150 metric calls and then evaluates both frozen and selected
 candidates on the 150-example repeated test split, plus the separate frozen
 cell. Reflection calls are additional. `--dry-run` prints this planned count;
-it is intentionally not an automatic authorization to spend it.
+it is intentionally not an automatic authorization to spend it. Choose the
+local cap only after reviewing the dry run and setting a lower account-side
+project budget.
+
+The required `--max-observed-cost-usd` guard persists completed-call estimates
+in `observed-cost.json` and starts no new direct request or Pi episode after
+the recorded total reaches the cap. A request already in flight can overshoot
+the cap, and one Pi episode may contain multiple requests. The external project
+budget remains the authoritative hard ceiling.
 
 Reusing the same explicit output directory resumes GEPA checkpoints and skips
 cells that already have a `done.json` marker.

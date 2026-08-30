@@ -19,7 +19,7 @@ from reef.harness import (
 )
 from reef.harness.model_binding import ModelBinding
 
-from .models import TASK_MODEL_PRICE, TokenUsage, UsageLedger, empty_usage, trajectory_usage
+from .models import TASK_MODEL_PRICE, CostGuard, TokenUsage, UsageLedger, empty_usage, trajectory_usage
 
 RULES_COMPONENT = "rules"
 _FINAL_ANSWER = re.compile(r"(?m)^\s*###\s+([^\s]+)\s*$")
@@ -118,6 +118,7 @@ class ReefCompositionAdapter:
         binary: str | None = None,
         timeout_s: float = 600.0,
         episode_runner: EpisodeRunner = run_episode,
+        spend_guard: CostGuard | None = None,
     ) -> None:
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
@@ -133,6 +134,7 @@ class ReefCompositionAdapter:
         self.binary = binary
         self.timeout_s = timeout_s
         self._episode_runner = episode_runner
+        self._spend_guard = spend_guard
         self._binding_nodes = task_model.compose_nodes(descriptor)
         self.usage = UsageLedger(TASK_MODEL_PRICE)
 
@@ -162,6 +164,9 @@ class ReefCompositionAdapter:
 
         for raw_example in batch:
             task, expected = _validate_example(raw_example)
+            observed_cost_usd = 0.0
+            if self._spend_guard is not None:
+                self._spend_guard.before_call()
             try:
                 result = self._episode_runner(
                     self.descriptor,
@@ -184,6 +189,7 @@ class ReefCompositionAdapter:
                     "residue": list(result.residue),
                     "usage": trajectory_usage(result.trajectory),
                 }
+                observed_cost_usd = TASK_MODEL_PRICE.estimate(output["usage"])
                 events = [dict(event) for event in result.trajectory]
             except (EpisodeError, TrajectoryError) as exc:
                 assistant_response = ""
@@ -197,6 +203,9 @@ class ReefCompositionAdapter:
                     "usage": empty_usage(),
                 }
                 events = []
+            finally:
+                if self._spend_guard is not None:
+                    self._spend_guard.record_call(observed_cost_usd)
 
             outputs.append(output)
             self.usage.add(output["usage"])
@@ -271,6 +280,7 @@ class ReefRulesAdapter(ReefCompositionAdapter):
         binary: str | None = None,
         timeout_s: float = 600.0,
         episode_runner: EpisodeRunner = run_episode,
+        spend_guard: CostGuard | None = None,
     ) -> None:
         super().__init__(
             descriptor=descriptor,
@@ -279,6 +289,7 @@ class ReefRulesAdapter(ReefCompositionAdapter):
             binary=binary,
             timeout_s=timeout_s,
             episode_runner=episode_runner,
+            spend_guard=spend_guard,
         )
 
 
