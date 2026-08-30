@@ -2,7 +2,7 @@
 
 This experiment uses upstream GEPA as the search engine and Reef as the
 harness runtime. GEPA proposes named text components and maintains candidate
-lineage and Pareto frontiers. Reef maps those components to declarative nodes,
+ancestry and Pareto frontiers. Reef maps those components to declarative nodes,
 renders the complete composition for Pi, runs isolated episodes, and publishes
 the selected tree.
 
@@ -89,7 +89,7 @@ it is intentionally not an automatic authorization to spend it.
 Reusing the same explicit output directory resumes GEPA checkpoints and skips
 cells that already have a `done.json` marker.
 
-## Retained evidence
+## Retained results
 
 Each search cell retains:
 
@@ -97,7 +97,7 @@ Each search cell retains:
 - GEPA's checkpoint and run log;
 - reflection, proposal, acceptance, budget, and Pareto events as JSONL;
 - candidates, parents, per-instance fronts, raw held-out outputs, and scores;
-- score versus metric-call budget and a Graphviz lineage;
+- score versus metric-call budget and a Graphviz parent graph;
 - task/reflection token usage, wall time, and an estimated USD cost using the
   price snapshot recorded in the report; and
 - the selected provider-free composition as a durable Reef Git-LFS artifact
