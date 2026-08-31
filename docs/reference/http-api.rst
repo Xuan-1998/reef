@@ -106,6 +106,13 @@ Send the same body you would send to the provider. Reef adds and changes
 nothing, sampling parameters included. Set ``"stream": true`` and read the SSE
 response for streaming.
 
+You may send ``x-reef-agent-record-id`` with an arbitrary non-empty value to
+choose the inference receipt. An identical completed non-streaming retry
+returns the already stored response without calling the provider again; reuse
+with different request content returns HTTP 409. When omitted, Reef generates
+the receipt. This also provides a stable external correlation key for optional
+inference observers.
+
 The receipt identifies the stored record:
 
 +---------------+-----------------------------------------------------------+
