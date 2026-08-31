@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -33,9 +34,16 @@ def publish_candidate(
     """Render without model credentials and publish a durable Reef version."""
     output_dir = Path(output_dir)
     tree_dir = output_dir / "published-composition"
-    tree_dir.mkdir(parents=True, exist_ok=False)
     files = adapter.render_candidate(candidate)
-    _write_tree(tree_dir, files)
+    candidate_sha256 = _mapping_sha256(candidate)
+    render_sha256 = _mapping_sha256(files)
+    _ensure_tree(tree_dir, files)
+
+    manifest_path = output_dir / "publication.json"
+    if manifest_path.exists():
+        manifest = _read_manifest(manifest_path)
+        _validate_manifest(manifest, scenario, candidate_sha256, render_sha256, files)
+        return _published_composition(manifest)
 
     repository_path = output_dir / "artifacts.git"
     backend = GitLFSRepositoryBackend(
@@ -44,23 +52,129 @@ def publish_candidate(
         work_dir=output_dir / "artifact-work",
         cache_dir=output_dir / "artifact-cache",
     )
+    retained_metadata = {
+        **metadata,
+        "reproduction_candidate_sha256": candidate_sha256,
+        "reproduction_render_sha256": render_sha256,
+    }
+    existing_metadata = backend.metadata()
+    if existing_metadata is not None:
+        if (
+            existing_metadata.get("reproduction_candidate_sha256") != candidate_sha256
+            or existing_metadata.get("reproduction_render_sha256") != render_sha256
+        ):
+            raise RuntimeError("existing artifact publication does not match the selected candidate")
+        published = backend.current()
+        manifest = _manifest_payload(
+            published.version,
+            published.parent_version,
+            repository_path,
+            files,
+            scenario,
+            candidate_sha256,
+            render_sha256,
+        )
+        _write_json_atomic(manifest_path, manifest)
+        return _published_composition(manifest)
+
     parent = backend.fork(metadata={"method": "gepa", "scenario": scenario})
-    local = Artifact.local(tree_dir, metadata=dict(metadata))
+    local = Artifact.local(tree_dir, metadata=retained_metadata)
     published = backend.publish(local, expected_parent=parent)
 
-    manifest = {
-        "artifact_version": published.version,
-        "parent_artifact_version": published.parent_version,
+    manifest = _manifest_payload(
+        published.version,
+        published.parent_version,
+        repository_path,
+        files,
+        scenario,
+        candidate_sha256,
+        render_sha256,
+    )
+    _write_json_atomic(manifest_path, manifest)
+    return _published_composition(manifest)
+
+
+def _ensure_tree(root: Path, files: Mapping[str, str]) -> None:
+    if not root.exists():
+        root.mkdir(parents=True)
+        _write_tree(root, files)
+        return
+    observed = {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    if observed != dict(files):
+        raise RuntimeError("existing published composition does not match the selected candidate")
+
+
+def _mapping_sha256(value: Mapping[str, str]) -> str:
+    serialized = json.dumps(dict(value), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def _manifest_payload(
+    artifact_version: str,
+    parent_artifact_version: str | None,
+    repository_path: Path,
+    files: Mapping[str, str],
+    scenario: str,
+    candidate_sha256: str,
+    render_sha256: str,
+) -> dict[str, Any]:
+    return {
+        "artifact_version": artifact_version,
+        "parent_artifact_version": parent_artifact_version,
         "repository": str(repository_path),
         "files": sorted(files),
+        "scenario": scenario,
+        "candidate_sha256": candidate_sha256,
+        "render_sha256": render_sha256,
     }
-    (output_dir / "publication.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def _read_manifest(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"invalid publication manifest: {path}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"invalid publication manifest: {path}")
+    return value
+
+
+def _validate_manifest(
+    manifest: Mapping[str, Any],
+    scenario: str,
+    candidate_sha256: str,
+    render_sha256: str,
+    files: Mapping[str, str],
+) -> None:
+    expected = {
+        "scenario": scenario,
+        "candidate_sha256": candidate_sha256,
+        "render_sha256": render_sha256,
+        "files": sorted(files),
+    }
+    if any(manifest.get(key) != value for key, value in expected.items()):
+        raise RuntimeError("publication manifest does not match the selected candidate")
+
+
+def _published_composition(manifest: Mapping[str, Any]) -> PublishedComposition:
     return PublishedComposition(
-        artifact_version=published.version,
-        parent_artifact_version=published.parent_version,
-        repository=str(repository_path),
-        files=tuple(sorted(files)),
+        artifact_version=str(manifest["artifact_version"]),
+        parent_artifact_version=(
+            str(manifest["parent_artifact_version"]) if manifest.get("parent_artifact_version") is not None else None
+        ),
+        repository=str(manifest["repository"]),
+        files=tuple(str(path) for path in manifest["files"]),
     )
+
+
+def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def _write_tree(root: Path, files: Mapping[str, str]) -> None:

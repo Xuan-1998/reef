@@ -19,8 +19,15 @@ from gepa.adapters.default_adapter.default_adapter import DefaultAdapter, Evalua
 from harness.adapter import MULTI_NODE_COMPONENTS, ReefCompositionAdapter, ReefRulesAdapter, score_aime_answer
 from harness.budget import ObservedCostLedger
 from harness.callbacks import EvidenceCallback
-from harness.config import AIME_SPLIT_SIZES, GEPA_COMMIT, PI_VERSION, REEF_COMMIT, ExperimentConfig
-from harness.data import RULES_SEED, load_aime_splits, multi_node_seed, rules_seed
+from harness.config import (
+    AIME_DATASET_SHA256,
+    AIME_SPLIT_SIZES,
+    GEPA_COMMIT,
+    PI_VERSION,
+    REEF_COMMIT,
+    ExperimentConfig,
+)
+from harness.data import RULES_SEED, dataset_sha256, load_aime_splits, multi_node_seed, rules_seed
 from harness.heldout import CheckpointedHeldoutEvaluator
 from harness.models import REFLECTION_MODEL_PRICE, TASK_MODEL_PRICE, TrackedChatModel
 from harness.publication import publish_candidate
@@ -75,6 +82,7 @@ def main() -> None:
     selected_cells = CELLS if args.cell == "all" else (args.cell,)
     if any(cell != "reference" for cell in selected_cells):
         verify_pi_pin(args.pi_binary)
+        verify_git_lfs()
 
     output_root = args.output_dir or HERE / "outputs" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     skip_perfect_score = not args.smoke
@@ -121,14 +129,34 @@ def main() -> None:
         budget = 8
 
     output_root.mkdir(parents=True, exist_ok=True)
+    identity_sha256 = ensure_run_identity(
+        output_root / "run-identity.json",
+        {
+            "schema_version": 1,
+            "smoke": args.smoke,
+            "budget": budget,
+            "skip_perfect_score": skip_perfect_score,
+            "task_model": config.task_model,
+            "reflection_model": config.reflection_model,
+            "base_url": config.base_url,
+            "pins": {
+                "reef_base_commit": REEF_COMMIT,
+                "reef_source_commit": reef_source["commit"],
+                "gepa_commit": GEPA_COMMIT,
+                "pi_version": PI_VERSION,
+            },
+            "dataset_sha256": AIME_DATASET_SHA256,
+            "dataset_sizes": AIME_SPLIT_SIZES,
+        },
+    )
     ledger = ObservedCostLedger(output_root / "observed-cost.json", args.max_observed_cost_usd)
-    (output_root / "plan.json").write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(output_root / "plan.json", plan)
     write_dataset_manifest(output_root / "dataset-manifest.json", trainset, valset, testset)
     for cell in selected_cells:
         for seed in config.seeds:
             cell_dir = output_root / cell / f"seed-{seed}"
             cell_dir.mkdir(parents=True, exist_ok=True)
-            if (cell_dir / "done.json").exists():
+            if completed_cell(cell_dir, cell, seed, identity_sha256):
                 print(f"skip completed cell {cell} seed {seed}: {cell_dir}")
                 continue
             if cell == "reference":
@@ -143,9 +171,10 @@ def main() -> None:
                     api_key,
                     ledger,
                     skip_perfect_score,
+                    identity_sha256,
                 )
             elif cell == "frozen":
-                run_frozen(config, testset, seed, cell_dir, api_key, args.pi_binary, ledger)
+                run_frozen(config, testset, seed, cell_dir, api_key, args.pi_binary, ledger, identity_sha256)
             else:
                 run_reef_search(
                     config,
@@ -160,6 +189,7 @@ def main() -> None:
                     cell,
                     ledger,
                     skip_perfect_score,
+                    identity_sha256,
                 )
     # Full examples (including held-out answers) are retained only after every
     # requested search cell has finished or was already marked complete.
@@ -168,7 +198,17 @@ def main() -> None:
 
 
 def run_reference(
-    config, trainset, valset, testset, budget, seed, output_dir, api_key, ledger, skip_perfect_score
+    config,
+    trainset,
+    valset,
+    testset,
+    budget,
+    seed,
+    output_dir,
+    api_key,
+    ledger,
+    skip_perfect_score,
+    identity_sha256,
 ) -> None:
     task = TrackedChatModel(
         ModelBinding(config.base_url, config.task_model, api_key=api_key),
@@ -209,10 +249,10 @@ def run_reference(
         task_price=TASK_MODEL_PRICE,
         reflection_price=REFLECTION_MODEL_PRICE,
     )
-    mark_done(output_dir)
+    mark_done(output_dir, "reference", seed, identity_sha256)
 
 
-def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger) -> None:
+def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger, identity_sha256) -> None:
     adapter = ReefCompositionAdapter(
         descriptor=get_adapter("pi"),
         task_model=ModelBinding(config.base_url, config.task_model, api_key=api_key),
@@ -250,7 +290,7 @@ def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger) ->
         scenario=f"gepa-frozen-{seed}",
         metadata={"cell": "frozen", "seed": seed, "test_score": score},
     )
-    mark_done(output_dir)
+    mark_done(output_dir, "frozen", seed, identity_sha256)
 
 
 def run_reef_search(
@@ -266,6 +306,7 @@ def run_reef_search(
     cell,
     ledger,
     skip_perfect_score,
+    identity_sha256,
 ) -> None:
     binding = ModelBinding(config.base_url, config.task_model, api_key=api_key)
     if cell == "rules":
@@ -333,7 +374,7 @@ def run_reef_search(
             "selected_test_score": outcome.selected_test_score,
         },
     )
-    mark_done(output_dir)
+    mark_done(output_dir, cell, seed, identity_sha256)
 
 
 def report_config(
@@ -395,6 +436,10 @@ def verify_pi_pin(binary: str) -> None:
         raise SystemExit(f"Pi version is {installed!r}, expected {PI_VERSION}")
 
 
+def verify_git_lfs() -> None:
+    _command_output(["git", "lfs", "version"])
+
+
 def _command_output(command: list[str]) -> str:
     try:
         return subprocess.run(
@@ -411,15 +456,13 @@ def _command_output(command: list[str]) -> str:
 
 def write_dataset_manifest(path: Path, trainset, valset, testset) -> None:
     splits = {"train": trainset, "validation": valset, "test": testset}
-    serialized = json.dumps(splits, indent=2, sort_keys=True) + "\n"
-    digest = hashlib.sha256(serialized.encode()).hexdigest()
     payload = {
         "source": "gepa.examples.aime.init_dataset()",
         "gepa_commit": GEPA_COMMIT,
-        "sha256": digest,
+        "sha256": dataset_sha256(trainset, valset, testset),
         "sizes": {name: len(items) for name, items in splits.items()},
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_once_json(path, payload, "dataset manifest")
 
 
 def write_dataset_artifact(path: Path, trainset, valset, testset) -> None:
@@ -427,8 +470,68 @@ def write_dataset_artifact(path: Path, trainset, valset, testset) -> None:
     path.write_text(json.dumps(splits, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def mark_done(output_dir: Path) -> None:
-    (output_dir / "done.json").write_text('{"complete": true}\n', encoding="utf-8")
+def ensure_run_identity(path: Path, identity: dict[str, Any]) -> str:
+    serialized = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(serialized.encode()).hexdigest()
+    write_once_json(path, {**identity, "sha256": digest}, "run identity")
+    return digest
+
+
+def completed_cell(output_dir: Path, cell: str, seed: int, identity_sha256: str) -> bool:
+    marker = output_dir / "done.json"
+    if not marker.exists():
+        return False
+    expected = {
+        "complete": True,
+        "cell": cell,
+        "seed": seed,
+        "run_identity_sha256": identity_sha256,
+    }
+    observed = read_json_object(marker)
+    if observed != expected:
+        raise RuntimeError(f"completed cell marker does not match this run: {marker}")
+    for name in ("summary.json", "config.json"):
+        if not (output_dir / name).is_file():
+            raise RuntimeError(f"completed cell is missing {name}: {output_dir}")
+    if cell != "reference" and not (output_dir / "publication.json").is_file():
+        raise RuntimeError(f"completed cell is missing publication.json: {output_dir}")
+    return True
+
+
+def mark_done(output_dir: Path, cell: str, seed: int, identity_sha256: str) -> None:
+    write_json_atomic(
+        output_dir / "done.json",
+        {
+            "complete": True,
+            "cell": cell,
+            "seed": seed,
+            "run_identity_sha256": identity_sha256,
+        },
+    )
+
+
+def write_once_json(path: Path, payload: dict[str, Any], label: str) -> None:
+    if path.exists():
+        if read_json_object(path) != payload:
+            raise RuntimeError(f"existing {label} does not match this run: {path}")
+        return
+    write_json_atomic(path, payload)
+
+
+def read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"invalid JSON object: {path}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"invalid JSON object: {path}")
+    return value
+
+
+def write_json_atomic(path: Path, payload: Any) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 if __name__ == "__main__":

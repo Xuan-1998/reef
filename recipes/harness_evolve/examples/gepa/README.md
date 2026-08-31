@@ -28,7 +28,8 @@ Reef and that held-out evaluation remains sealed until search completes.
 - Pi: `0.84.2`
 - task model: `gpt-4.1-mini-2025-04-14`
 - reflection model: `gpt-5-2025-08-07`
-- dataset: `gepa.examples.aime.init_dataset()` at the GEPA pin
+- dataset: `gepa.examples.aime.init_dataset()` at the GEPA pin, with full
+  split SHA-256 `74e81306a9a1debadd64c49a4ab3588615f7bb698b695a59c17c65dd3b895185`
 - search budget: 150 metric calls for each search cell
 - seeds: 0, 1, and 2
 
@@ -51,11 +52,11 @@ editable:
 ./run.sh --cell reference --dry-run
 ```
 
-Install Pi `0.84.2` and either put it on `PATH` or set
+Install Git LFS and Pi `0.84.2`, then either put Pi on `PATH` or set
 `REEF_PI_BINARY` to its absolute path. A dry run of every cell verifies that
 the current Reef source descends from the pinned base, records its exact commit
-and tracked-dirty state, validates the GEPA source pin and Pi version, and does
-not load the dataset or call a model:
+and tracked-dirty state, validates the GEPA source pin, Pi version, and Git LFS
+publication prerequisite, and does not load the dataset or call a model:
 
 ```bash
 REEF_PI_BINARY=/path/to/pi ./run.sh --dry-run
@@ -105,7 +106,10 @@ the cap, and one Pi episode may contain multiple requests. The external project
 budget remains the authoritative hard ceiling.
 
 Reusing the same explicit output directory resumes GEPA checkpoints and skips
-cells that already have a `done.json` marker.
+cells whose `done.json` marker and required reports match the immutable run
+identity. Changing smoke mode, budget, model, source commit, dependency pin, or
+dataset pin requires a new output directory. Cell, seed, and spend-cap choices
+may be staged across invocations of the same compatible run.
 Task and reflection token totals are also written after every completed call
 to each cell's `task-usage.json` and `reflection-usage.json`, so reports include
 calls completed before a restart rather than only the final process's usage.
@@ -161,8 +165,9 @@ The following choices are stricter than the short upstream example:
 - evaluation caching stays at GEPA's `False` default so the metric-call budget
   means the same thing in every cell; and
 - the upstream loader does not pin Hugging Face dataset revisions, so this
-  runner verifies the expected 45/45/150 sizes and retains a content SHA-256
-  plus the complete splits after a successful run.
+  runner verifies the committed full-split SHA-256 as well as the expected
+  45/45/150 sizes before any paid call, then retains the complete splits after
+  a successful run.
 
 The Reef cells are an adapter reproduction, not an absolute-score reproduction
 of the direct reference cell. Pi adds its own agent loop and tool surface.

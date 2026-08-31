@@ -13,6 +13,7 @@ OPENAI_BASE_URL = "https://api.openai.com"
 SEARCH_BUDGET = 150
 EXPERIMENT_SEEDS = (0, 1, 2)
 AIME_SPLIT_SIZES = {"train": 45, "validation": 45, "test": 150}
+AIME_DATASET_SHA256 = "74e81306a9a1debadd64c49a4ab3588615f7bb698b695a59c17c65dd3b895185"
 
 
 @dataclass(frozen=True)

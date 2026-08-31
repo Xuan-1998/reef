@@ -49,6 +49,14 @@ def runner_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.fixture
+def data_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
+    for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
+        del sys.modules[name]
+    return importlib.import_module("harness.data")
+
+
+@pytest.fixture
 def models_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
     for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
@@ -99,6 +107,7 @@ def test_reproduction_defaults_are_exact_and_secret_free(config_module):
     assert config_module.SEARCH_BUDGET == 150
     assert config_module.EXPERIMENT_SEEDS == (0, 1, 2)
     assert config_module.AIME_SPLIT_SIZES == {"train": 45, "validation": 45, "test": 150}
+    assert config_module.AIME_DATASET_SHA256 == "74e81306a9a1debadd64c49a4ab3588615f7bb698b695a59c17c65dd3b895185"
     assert set(asdict(config)) == {
         "task_model",
         "reflection_model",
@@ -281,7 +290,46 @@ def test_rules_cell_driver_persists_usage_before_search(runner_module, tmp_path,
             "rules",
             None,
             False,
+            "identity",
         )
+
+
+def test_dataset_loader_rejects_same_size_content_drift(data_module, monkeypatch):
+    import gepa.examples.aime
+
+    monkeypatch.setattr(
+        gepa.examples.aime,
+        "init_dataset",
+        lambda: (
+            [{"input": f"train-{index}", "answer": "### 1"} for index in range(45)],
+            [{"input": f"validation-{index}", "answer": "### 1"} for index in range(45)],
+            [{"input": f"test-{index}", "answer": "### 1"} for index in range(150)],
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="content changed"):
+        data_module.load_aime_splits()
+
+
+def test_run_identity_refuses_incompatible_resume(runner_module, tmp_path):
+    path = tmp_path / "run-identity.json"
+    digest = runner_module.ensure_run_identity(path, {"schema_version": 1, "smoke": False})
+
+    assert runner_module.ensure_run_identity(path, {"schema_version": 1, "smoke": False}) == digest
+    with pytest.raises(RuntimeError, match="does not match"):
+        runner_module.ensure_run_identity(path, {"schema_version": 1, "smoke": True})
+
+
+def test_completed_cell_requires_matching_identity_and_artifacts(runner_module, tmp_path):
+    run_dir = tmp_path / "rules" / "seed-0"
+    run_dir.mkdir(parents=True)
+    for name in ("summary.json", "config.json", "publication.json"):
+        (run_dir / name).write_text("{}\n", encoding="utf-8")
+    runner_module.mark_done(run_dir, "rules", 0, "identity")
+
+    assert runner_module.completed_cell(run_dir, "rules", 0, "identity")
+    with pytest.raises(RuntimeError, match="does not match"):
+        runner_module.completed_cell(run_dir, "rules", 0, "different")
 
 
 @pytest.mark.parametrize(
@@ -809,6 +857,9 @@ def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
             observed["fork_metadata"] = metadata
             return ArtifactRef("parent", "parent-version", None)
 
+        def metadata(self):
+            return None
+
         def publish(self, artifact, expected_parent):
             observed["expected_parent"] = expected_parent
             observed["models"] = (artifact.local_path / "pi-agent" / "models.json").read_text()
@@ -838,7 +889,9 @@ def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
         path.read_text() for path in (tmp_path / "result" / "published-composition").rglob("*") if path.is_file()
     )
     assert "must-not-publish" not in published_text
-    assert observed["metadata"] == {"score": 1.0}
+    assert observed["metadata"]["score"] == 1.0
+    assert len(observed["metadata"]["reproduction_candidate_sha256"]) == 64
+    assert len(observed["metadata"]["reproduction_render_sha256"]) == 64
 
 
 def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module, tmp_path):
@@ -864,6 +917,18 @@ def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module,
     assert len(published.artifact_version) == 40
     assert len(published.parent_artifact_version) == 40
     assert Path(published.repository).is_dir()
+    assert (tmp_path / "durable" / "publication.json").is_file()
+
+    (tmp_path / "durable" / "publication.json").unlink()
+    recovered = publication_module.publish_candidate(
+        adapter=adapter,
+        candidate={"rules": "published rules"},
+        output_dir=tmp_path / "durable",
+        scenario="gepa-durable-smoke",
+        metadata={"kind": "test"},
+    )
+
+    assert recovered.artifact_version == published.artifact_version
     assert (tmp_path / "durable" / "publication.json").is_file()
 
 
