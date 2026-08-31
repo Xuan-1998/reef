@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 
-class SpendCapReached(RuntimeError):
-    """Raised before a new model call once observed spend reaches the cap."""
+class SpendCapReached(SystemExit):
+    """Stop the run before scorers can convert budget exhaustion into a zero."""
 
 
 class ObservedCostLedger:

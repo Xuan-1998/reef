@@ -8,12 +8,14 @@ version = "0.1.0"
 description = "Pinned GEPA reproduction over Reef harness compositions"
 requires-python = ">=3.10"
 dependencies = [
-    "gepa @ git+https://github.com/gepa-ai/gepa.git@92dadfffbe98c8ecf508179a1cab09c1bb85cd32",
+    "gepa @ git+https://github.com/gepa-ai/gepa.git@67da814e33328e6714c3636428d03c86adb66cd7",
 ]
 
 [project.optional-dependencies]
 reference = [
     "datasets>=2.14.6",
+    "dspy>=3.0.0",
+    "litellm>=1.83.0,<1.92",
 ]
 
 [tool.setuptools.packages.find]

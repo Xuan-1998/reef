@@ -75,6 +75,14 @@ def models_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.fixture
+def reference_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
+    for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
+        del sys.modules[name]
+    return importlib.import_module("harness.reference")
+
+
+@pytest.fixture
 def budget_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
     for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
@@ -110,14 +118,17 @@ def test_reproduction_defaults_are_exact_and_secret_free(config_module):
     config = config_module.ExperimentConfig()
 
     assert config_module.REEF_COMMIT == "8e2fcc30f81bc476e5f98e7dcaa37c2d879d8201"
-    assert config_module.GEPA_COMMIT == "92dadfffbe98c8ecf508179a1cab09c1bb85cd32"
+    assert config_module.GEPA_COMMIT == "67da814e33328e6714c3636428d03c86adb66cd7"
     assert config_module.PI_VERSION == "0.84.2"
     assert config_module.TASK_MODEL == "gpt-4.1-mini-2025-04-14"
-    assert config_module.REFLECTION_MODEL == "gpt-5-2025-08-07"
-    assert config_module.SEARCH_BUDGET == 150
-    assert config_module.EXPERIMENT_SEEDS == (0, 1, 2)
-    assert config_module.AIME_SPLIT_SIZES == {"train": 45, "validation": 45, "test": 150}
-    assert config_module.AIME_DATASET_SHA256 == "74e81306a9a1debadd64c49a4ab3588615f7bb698b695a59c17c65dd3b895185"
+    assert config_module.REFLECTION_MODEL == "gpt-5.1-2025-11-13"
+    assert config_module.SEARCH_BUDGET == 500
+    assert config_module.EXPERIMENT_SEEDS == (0,)
+    assert config_module.TASK_TEMPERATURE == 1.0
+    assert config_module.TASK_MAX_TOKENS == 32_000
+    assert config_module.MAX_WORKERS == 32
+    assert config_module.AIME_SPLIT_SIZES == {"train": 45, "validation": 45, "test": 30}
+    assert config_module.AIME_DATASET_SHA256 == "0ee1433b0a5ecc4e7875004af026662a9137eb6ff30b8ffb081f139713e9c2e9"
     assert set(asdict(config)) == {
         "task_model",
         "reflection_model",
@@ -306,20 +317,37 @@ def test_rules_cell_driver_persists_usage_before_search(runner_module, tmp_path,
 
 
 def test_dataset_loader_rejects_same_size_content_drift(data_module, monkeypatch):
-    import gepa.examples.aime
+    import datasets
 
-    monkeypatch.setattr(
-        gepa.examples.aime,
-        "init_dataset",
-        lambda: (
-            [{"input": f"train-{index}", "answer": "### 1"} for index in range(45)],
-            [{"input": f"validation-{index}", "answer": "### 1"} for index in range(45)],
-            [{"input": f"test-{index}", "answer": "### 1"} for index in range(150)],
-        ),
-    )
+    def load_dataset(name, *args, **kwargs):
+        if name == "AI-MO/aimo-validation-aime":
+            return [{"problem": f"source-{index}", "solution": "solution", "answer": 1} for index in range(90)]
+        return [{"problem": f"test-{index}", "answer": 1} for index in range(30)]
+
+    monkeypatch.setattr(datasets, "load_dataset", load_dataset)
 
     with pytest.raises(RuntimeError, match="content changed"):
         data_module.load_aime_splits()
+
+
+def test_official_aime_metric_accepts_only_a_bare_integer(reference_module):
+    class Prediction:
+        answer = "42"
+
+    example = {
+        "input": "problem",
+        "answer": "### 42",
+        "additional_context": {"solution": "full solution"},
+    }
+
+    score, feedback = reference_module.math_metric(example, Prediction())
+
+    assert score == 1.0
+    assert "full step-by-step solution" in feedback
+    Prediction.answer = "The answer is 42"
+    score, feedback = reference_module.math_metric(example, Prediction())
+    assert score == 0.0
+    assert "valid integer and nothing else" in feedback
 
 
 def test_run_identity_refuses_incompatible_resume(runner_module, tmp_path):
@@ -349,7 +377,8 @@ def test_completed_cell_requires_matching_identity_and_artifacts(runner_module, 
         runner_module.completed_cell(run_dir, "rules", 0, "identity")
 
 
-def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, tmp_path):
+def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, config_module, tmp_path):
+    assert evidence_module.SEEDS == config_module.EXPERIMENT_SEEDS
     output_root = tmp_path / "full"
     output_root.mkdir()
     identity = "identity-sha"
@@ -441,6 +470,84 @@ def gepa_result(*, candidates, scores, fronts):
     )
 
 
+def test_reference_driver_matches_current_official_aime_config(runner_module, monkeypatch, tmp_path):
+    from gepa.core.adapter import EvaluationBatch
+    from gepa.core.result import GEPAResult
+
+    observed = {}
+
+    class Usage:
+        def snapshot(self):
+            return {
+                "requests": 0,
+                "input_tokens": 0,
+                "cached_input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+            }
+
+    class Model:
+        usage = Usage()
+
+    class HeldoutAdapter:
+        def evaluate(self, batch, candidate, capture_traces=False):
+            return EvaluationBatch(outputs=[{"candidate": candidate}], scores=[float(candidate == "better")])
+
+    result = GEPAResult(
+        candidates=[{"current_candidate": runner_module.OFFICIAL_SEED_PROMPT}, {"current_candidate": "better"}],
+        parents=[[None], [0]],
+        val_aggregate_scores=[0.0, 1.0],
+        val_subscores=[{}, {}],
+        per_val_instance_best_candidates={"validation": {1}},
+        discovery_eval_counts=[0, 2],
+        total_metric_calls=8,
+        _str_candidate_key="current_candidate",
+    )
+
+    def optimize_anything(**kwargs):
+        observed["optimization"] = kwargs
+        return result
+
+    monkeypatch.setattr(runner_module, "TrackedDSPyLM", lambda *args, **kwargs: Model())
+    monkeypatch.setattr(runner_module, "TrackedGEPALM", lambda *args, **kwargs: Model())
+    monkeypatch.setattr(runner_module.dspy, "configure", lambda **kwargs: None)
+    monkeypatch.setattr(runner_module, "optimize_anything", optimize_anything)
+    monkeypatch.setattr(runner_module, "OfficialAIMEAdapter", HeldoutAdapter)
+    monkeypatch.setattr(runner_module, "write_search_report", lambda **kwargs: observed.setdefault("report", kwargs))
+    monkeypatch.setattr(runner_module, "mark_done", lambda *args: observed.setdefault("done", args))
+
+    runner_module.run_reference(
+        runner_module.ExperimentConfig(seeds=(0,)),
+        [{"input": "train", "answer": "### 1"}],
+        [{"input": "validation", "answer": "### 1"}],
+        [{"input": "test", "answer": "### 1"}],
+        8,
+        0,
+        tmp_path,
+        "dummy",
+        None,
+        32,
+        "identity",
+    )
+
+    call = observed["optimization"]
+    config = call["config"]
+    assert call["seed_candidate"] == runner_module.OFFICIAL_SEED_PROMPT
+    assert config.engine == "gepa"
+    assert config.max_evals == 8
+    assert config.max_concurrency == 32
+    assert config.engine_config["engine"] == {
+        "seed": 0,
+        "track_best_outputs": True,
+        "parallel": True,
+        "max_workers": 32,
+        "cache_evaluation": True,
+    }
+    assert config.engine_config["reflection"]["reflection_lm"] is not None
+    assert observed["report"]["outcome"].selected_test_score == 1.0
+    assert observed["done"][-1] == "identity"
+
+
 def test_pareto_specialists_are_retained_without_bypassing_the_promotion_gate(search_module):
     result = gepa_result(
         candidates=[{"rules": "seed"}, {"rules": "algebra specialist"}, {"rules": "geometry specialist"}],
@@ -517,13 +624,13 @@ def test_test_split_is_unsealed_only_after_upstream_search_returns(search_module
     assert outcome.selected_test_score == 1.0
 
 
-def test_search_forwards_smoke_only_perfect_score_policy(search_module, monkeypatch, tmp_path):
+def test_search_forwards_official_gepa_semantics(search_module, monkeypatch, tmp_path):
     from gepa.core.adapter import EvaluationBatch
 
     policies = []
 
     def optimize(**kwargs):
-        policies.append(kwargs["skip_perfect_score"])
+        policies.append((kwargs["skip_perfect_score"], kwargs["frontier_type"], kwargs["cache_evaluation"]))
         return gepa_result(candidates=[{"rules": "seed"}], scores=[0.0], fronts={0: {0}})
 
     class Adapter:
@@ -549,7 +656,7 @@ def test_search_forwards_smoke_only_perfect_score_policy(search_module, monkeypa
         skip_perfect_score=False,
     )
 
-    assert policies == [True, False]
+    assert policies == [(False, "hybrid", True), (False, "hybrid", True)]
 
 
 def test_smoke_policy_reflects_on_a_perfect_training_minibatch(search_module, tmp_path):
@@ -566,6 +673,7 @@ def test_smoke_policy_reflects_on_a_perfect_training_minibatch(search_module, tm
                 outputs=[{"rules": candidate["rules"]} for _ in batch],
                 scores=[1.0 for _ in batch],
                 trajectories=trajectories,
+                objective_scores=[{"score": 1.0} for _ in batch],
                 num_metric_calls=len(batch),
             )
 
@@ -698,6 +806,45 @@ def test_heldout_checkpoint_resumes_without_repeating_completed_examples(heldout
     assert calls == ["one", "two", "two", "three"]
     with pytest.raises(RuntimeError, match="identity changed"):
         evaluator.evaluate("selected", batch, {"rules": "different candidate"})
+
+
+def test_heldout_checkpoint_can_record_official_failure_scores(heldout_module, budget_module, tmp_path):
+    from gepa.core.adapter import EvaluationBatch
+
+    class Adapter:
+        def evaluate(self, batch, candidate, capture_traces=False):
+            if batch[0]["input"] == "fails":
+                raise RuntimeError("provider failure")
+            return EvaluationBatch(outputs=[{"answer": "1"}], scores=[1.0])
+
+    evaluator = heldout_module.CheckpointedHeldoutEvaluator(
+        Adapter(),
+        tmp_path / "checkpoints",
+        max_workers=2,
+        failure_score=0.0,
+    )
+    result = evaluator.evaluate(
+        "official",
+        [{"input": "works", "answer": "1"}, {"input": "fails", "answer": "1"}],
+        "prompt",
+    )
+
+    assert result.scores == [1.0, 0.0]
+    assert result.outputs[1] == {"error": "RuntimeError"}
+
+    class StopAdapter:
+        def evaluate(self, batch, candidate, capture_traces=False):
+            raise budget_module.SpendCapReached("stop")
+
+    stop_evaluator = heldout_module.CheckpointedHeldoutEvaluator(
+        StopAdapter(),
+        tmp_path / "stop-checkpoints",
+        max_workers=2,
+        failure_score=0.0,
+    )
+    with pytest.raises(budget_module.SpendCapReached, match="stop"):
+        stop_evaluator.evaluate("official", [{"input": "one", "answer": "1"}], "prompt")
+    assert not (tmp_path / "stop-checkpoints" / "official" / "example-0000.json").exists()
 
 
 def test_multi_node_candidate_renders_rules_and_skill_as_one_composition(adapter_module):
@@ -886,6 +1033,82 @@ def test_tracked_chat_model_retains_api_usage_without_serializing_a_key(models_m
     }
     assert guard.before == 1
     assert guard.costs == [pytest.approx(models_module.REFLECTION_MODEL_PRICE.estimate(model.usage.snapshot()))]
+
+
+def test_tracked_dspy_lm_accounts_provider_calls_but_not_cache_hits(models_module, monkeypatch, tmp_path):
+    from dspy.clients import lm as dspy_lm_module
+    from dspy.clients.cache import Cache
+
+    class Guard:
+        def __init__(self):
+            self.events = []
+
+        def before_call(self):
+            self.events.append("before")
+
+        def record_call(self, observed_cost_usd):
+            self.events.append(("record", observed_cost_usd))
+
+    class Response:
+        choices = []
+        usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 4,
+            "prompt_tokens_details": {"cached_tokens": 3},
+            "completion_tokens_details": {"reasoning_tokens": 2},
+        }
+
+        def model_dump(self):
+            return {"usage": self.usage}
+
+        def __getitem__(self, key):
+            if key == "choices":
+                return self.choices
+            raise KeyError(key)
+
+    calls = []
+
+    def completion(**kwargs):
+        calls.append(kwargs)
+        return Response()
+
+    monkeypatch.setattr(models_module.dspy, "cache", Cache(False, True, None))
+    monkeypatch.setattr(dspy_lm_module, "litellm_completion", completion)
+    guard = Guard()
+    path = tmp_path / "task-usage.json"
+    model = models_module.TrackedDSPyLM(
+        "task-model",
+        api_key="must-not-persist",
+        base_url="https://model.test",
+        temperature=1.0,
+        max_tokens=32_000,
+        price=models_module.TASK_MODEL_PRICE,
+        spend_guard=guard,
+        usage_path=path,
+    )
+
+    model.forward(prompt="same prompt")
+    model.forward(prompt="same prompt")
+
+    assert len(calls) == 1
+    request = calls[0]["request"]
+    assert request["model"] == "openai/task-model"
+    assert request["api_base"] == "https://model.test/v1"
+    assert request["temperature"] == 1.0
+    assert request["max_tokens"] == 32_000
+    assert model.usage.snapshot() == {
+        "requests": 1,
+        "input_tokens": 10,
+        "cached_input_tokens": 3,
+        "output_tokens": 4,
+        "reasoning_tokens": 2,
+    }
+    assert guard.events == [
+        "before",
+        ("record", pytest.approx(models_module.TASK_MODEL_PRICE.estimate(model.usage.snapshot()))),
+        "before",
+    ]
+    assert "must-not-persist" not in path.read_text(encoding="utf-8")
 
 
 def test_usage_ledger_persists_tokens_and_rejects_pricing_drift(models_module, tmp_path):

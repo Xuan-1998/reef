@@ -94,7 +94,9 @@ def run_sealed_search(
     custom_candidate_proposer: Callable[..., dict[str, str]] | None = None,
     callbacks: list[Any] | None = None,
     heldout_evaluator: HeldoutEvaluator | None = None,
-    skip_perfect_score: bool = True,
+    skip_perfect_score: bool = False,
+    frontier_type: str = "hybrid",
+    cache_evaluation: bool = True,
 ) -> SealedSearchOutcome:
     """Run upstream GEPA, gate on validation, then and only then touch test.
 
@@ -116,12 +118,13 @@ def run_sealed_search(
         reflection_lm=reflection_lm,
         custom_candidate_proposer=custom_candidate_proposer,
         candidate_selection_strategy="pareto",
+        frontier_type=frontier_type,
         module_selector=module_selector,
         max_metric_calls=max_metric_calls,
         run_dir=str(run_dir),
         seed=seed,
         track_best_outputs=True,
-        cache_evaluation=False,
+        cache_evaluation=cache_evaluation,
         callbacks=callbacks,
         skip_perfect_score=skip_perfect_score,
     )

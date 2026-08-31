@@ -10,8 +10,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from .config import EXPERIMENT_SEEDS
+
 CELLS = ("reference", "frozen", "rules", "multi")
-SEEDS = (0, 1, 2)
+SEEDS = EXPERIMENT_SEEDS
 _ROOT_FILES = (
     "run-identity.json",
     "plan.json",

@@ -24,14 +24,16 @@ Reef and that held-out evaluation remains sealed until search completes.
 - Reef:
   [`8e2fcc30f81bc476e5f98e7dcaa37c2d879d8201`](https://github.com/Human-Agent-Society/reef/commit/8e2fcc30f81bc476e5f98e7dcaa37c2d879d8201)
 - GEPA:
-  [`92dadfffbe98c8ecf508179a1cab09c1bb85cd32`](https://github.com/gepa-ai/gepa/commit/92dadfffbe98c8ecf508179a1cab09c1bb85cd32)
+  [`67da814e33328e6714c3636428d03c86adb66cd7`](https://github.com/gepa-ai/gepa/commit/67da814e33328e6714c3636428d03c86adb66cd7)
 - Pi: `0.84.2`
 - task model: `gpt-4.1-mini-2025-04-14`
-- reflection model: `gpt-5-2025-08-07`
-- dataset: `gepa.examples.aime.init_dataset()` at the GEPA pin, with full
-  split SHA-256 `74e81306a9a1debadd64c49a4ab3588615f7bb698b695a59c17c65dd3b895185`
-- search budget: 150 metric calls for each search cell
-- seeds: 0, 1, and 2
+- reflection model: `gpt-5.1-2025-11-13`
+- dataset: the current upstream
+  [`examples/aime_math/utils.py`](https://github.com/gepa-ai/gepa/blob/67da814e33328e6714c3636428d03c86adb66cd7/examples/aime_math/utils.py)
+  split, with pinned Hugging Face revisions and full-split SHA-256
+  `0ee1433b0a5ecc4e7875004af026662a9137eb6ff30b8ffb081f139713e9c2e9`
+- search budget: 500 metric calls for each search cell
+- seed: 0
 
 The dependency pin lives in `pyproject.toml`; model and experiment defaults
 live in `harness/config.py` so runners and tests share one source of truth.
@@ -72,38 +74,40 @@ published tree.
 Run one cheap, non-authoritative plumbing check first:
 
 ```bash
-OPENAI_API_KEY=... REEF_PI_BINARY=/path/to/pi \
-  ./run.sh --cell multi --seeds 0 --smoke \
-  --max-observed-cost-usd 5 --output-dir outputs/smoke
+OPENAI_API_KEY=... ./run.sh --cell reference --seeds 0 --smoke \
+  --max-observed-cost-usd 5 --output-dir outputs/reference-smoke
 ```
 
-Smoke mode sets upstream GEPA's `skip_perfect_score=False` so the reflection
-path is still attempted when both tiny sampled training examples happen to
-score perfectly. The plan and per-cell configuration record this setting.
-The exact full reproduction preserves GEPA's `True` default.
+The reference cell always preserves upstream GEPA's
+`skip_perfect_score=False`. Smoke mode uses one search worker instead of 32 so
+the plumbing check cannot start a whole concurrent wave after reaching its
+local spend cap. Authoritative runs preserve the upstream 32-worker setting.
 
 Run the exact four-cell reproduction only after setting an account-side spend
 limit and reviewing the projected budget:
 
 ```bash
 OPENAI_API_KEY=... REEF_PI_BINARY=/path/to/pi \
-  ./run.sh --cell all --seeds 0 1 2 --budget 150 \
+  ./run.sh --cell all --seeds 0 --budget 500 \
   --max-observed-cost-usd 100 --output-dir outputs/full
 ```
 
-The exact command schedules about 4,500 task-model evaluations: each search
-cell spends 150 metric calls and then evaluates both frozen and selected
-candidates on the 150-example repeated test split, plus the separate frozen
-cell. Reflection calls are additional. `--dry-run` prints this planned count;
+The exact command nominally schedules 1,710 task-model evaluations: each search cell
+spends 500 metric calls and then evaluates both frozen and selected candidates
+on the 30-example AIME 2025 test split, plus the separate frozen cell.
+Reflection calls are additional. The reference cell alone schedules 560 task
+evaluations. The pinned upstream concurrent budget check can admit up to 31
+additional in-flight evaluations, so provision for as many as 591 reference
+task requests. `--dry-run` prints the nominal planned count;
 it is intentionally not an automatic authorization to spend it. Choose the
 local cap only after reviewing the dry run and setting a lower account-side
 project budget.
 
 The required `--max-observed-cost-usd` guard persists completed-call estimates
 in `observed-cost.json` and starts no new direct request or Pi episode after
-the recorded total reaches the cap. A request already in flight can overshoot
-the cap, and one Pi episode may contain multiple requests. The external project
-budget remains the authoritative hard ceiling.
+the recorded total reaches the cap. Concurrent requests already in flight can
+overshoot the cap, and one Pi episode may contain multiple requests. The
+external project budget remains the authoritative hard ceiling.
 
 Reusing the same explicit output directory resumes GEPA checkpoints and skips
 cells whose `done.json` marker and required reports match the immutable run
@@ -129,7 +133,8 @@ Each search cell retains:
 
 - the full pinned configuration and dataset splits;
 - GEPA's checkpoint and run log;
-- reflection, proposal, acceptance, budget, and Pareto events as JSONL;
+- proposal, acceptance, budget, and Pareto state from GEPA's checkpoint and
+  engine log;
 - candidates, parents, per-instance fronts, raw held-out outputs, and scores;
 - per-example held-out checkpoints for interruption-safe resume;
 - score versus metric-call budget and a Graphviz parent graph;
@@ -147,30 +152,34 @@ The cost estimate uses standard-processing prices observed on 2026-08-30 from
 the official model pages: [GPT-4.1
 Mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini) at $0.40/M
 input, $0.10/M cached input, and $1.60/M output;
-[GPT-5](https://developers.openai.com/api/docs/models/gpt-5) at $1.25/M input,
+[GPT-5.1](https://developers.openai.com/api/docs/models/gpt-5.1) at $1.25/M input,
 $0.125/M cached input, and $10/M output. The rates and source URLs are copied
 into every report so later readers can distinguish measured tokens from price
 assumptions.
 
 ## Reproduction contract and deviations
 
-The reference cell follows the pinned upstream README example: it calls
-`gepa.optimize` with `DefaultAdapter`, the same seed prompt, dataset loader,
-models, budget, and Pareto search implementation. It deliberately routes the
-two models through Reef's `ModelBinding` to preserve exact dated model IDs and
-uniform token accounting.
+The reference cell follows the pinned upstream
+[`examples/aime_math/main.py`](https://github.com/gepa-ai/gepa/blob/67da814e33328e6714c3636428d03c86adb66cd7/examples/aime_math/main.py): it calls
+`optimize_anything`, uses DSPy `ChainOfThought`, and preserves the seed prompt,
+integer scorer and feedback, models, 500-call budget, 32 workers, Pareto search,
+and GEPA evaluation cache. The held-out pass preserves upstream's 16-worker and
+zero-on-error behavior while adding per-example restart checkpoints. Dated
+model IDs and persistent token accounting make the provider inputs auditable
+without changing the evaluator semantics.
 
 The following choices are stricter than the short upstream example:
 
-- all four cells use the same exact `### <answer>` line scorer instead of the
-  default substring evaluator;
+- the direct reference uses upstream's bare-integer DSPy output field and the
+  Reef cells keep their `### <answer>` trajectory contract;
 - validation alone decides whether a candidate is promoted, after which both
   the seed and the fixed selection are evaluated on the sealed test split;
-- evaluation caching stays at GEPA's `False` default so the metric-call budget
-  means the same thing in every cell; and
+- the direct solver preserves DSPy's response cache and excludes marked cache
+  hits from provider usage; GEPA's official `cache_evaluation=True`
+  candidate/example cache also remains enabled; and
 - the upstream loader does not pin Hugging Face dataset revisions, so this
-  runner verifies the committed full-split SHA-256 as well as the expected
-  45/45/150 sizes before any paid call, then retains the complete splits after
+  runner verifies pinned revisions and the committed full-split SHA-256 as well
+  as the expected 45/45/30 sizes before any paid call, then retains the splits after
   a successful run.
 
 The Reef cells are an adapter reproduction, not an absolute-score reproduction
@@ -195,6 +204,6 @@ artifact publication.
 
 ## Results
 
-No paid result is recorded yet. A full result belongs here only after all
-three seeds finish under an approved spend cap; neutral or negative deltas are
-reported unchanged.
+No paid result is recorded yet. A full result belongs here only after seed 0
+under an approved spend cap; neutral or negative deltas are reported
+unchanged.

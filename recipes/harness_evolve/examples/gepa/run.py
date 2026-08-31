@@ -9,50 +9,48 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from gepa.adapters.default_adapter.default_adapter import DefaultAdapter, EvaluationResult
+import dspy
+from gepa.optimize_anything import OptimizeAnythingConfig, optimize_anything
 
-from harness.adapter import MULTI_NODE_COMPONENTS, ReefCompositionAdapter, ReefRulesAdapter, score_aime_answer
+from harness.adapter import MULTI_NODE_COMPONENTS, ReefCompositionAdapter, ReefRulesAdapter
 from harness.budget import ObservedCostLedger
 from harness.callbacks import EvidenceCallback
 from harness.config import (
     AIME_DATASET_SHA256,
     AIME_SPLIT_SIZES,
+    AIME_TEST_REVISION,
+    AIME_TRAIN_REVISION,
     EXPERIMENT_SEEDS,
     GEPA_COMMIT,
+    MAX_WORKERS,
     PI_VERSION,
     REEF_COMMIT,
     SEARCH_BUDGET,
+    TASK_MAX_TOKENS,
+    TASK_TEMPERATURE,
     ExperimentConfig,
 )
-from harness.data import RULES_SEED, dataset_sha256, load_aime_splits, multi_node_seed, rules_seed
+from harness.data import dataset_sha256, load_aime_splits, multi_node_seed, rules_seed
 from harness.evidence import export_evidence
 from harness.heldout import CheckpointedHeldoutEvaluator
-from harness.models import REFLECTION_MODEL_PRICE, TASK_MODEL_PRICE, TrackedChatModel
+from harness.models import REFLECTION_MODEL_PRICE, TASK_MODEL_PRICE, TrackedChatModel, TrackedDSPyLM, TrackedGEPALM
 from harness.publication import publish_candidate
+from harness.reference import OFFICIAL_SEED_PROMPT, OfficialAIMEAdapter
+from harness.reference import evaluate as evaluate_official_aime
 from harness.reporting import write_aggregate_report, write_search_report
-from harness.search import run_sealed_search
+from harness.search import SealedSearchOutcome, decide_promotion, run_sealed_search
 from reef.harness.adapters import get_adapter
 from reef.harness.model_binding import ModelBinding
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
 CELLS = ("reference", "frozen", "rules", "multi")
-
-
-class ExactAIMEEvaluator:
-    def __call__(self, data: dict[str, Any], response: str) -> EvaluationResult:
-        score = score_aime_answer(data["answer"], response)
-        feedback = (
-            f"Correct: the final answer exactly matched {data['answer']!r}."
-            if score
-            else f"Incorrect: the final answer line must be exactly {data['answer']!r}."
-        )
-        return EvaluationResult(score=score, feedback=feedback, objective_scores=None)
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,7 +92,8 @@ def main() -> None:
         verify_git_lfs()
 
     output_root = args.output_dir or HERE / "outputs" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    skip_perfect_score = not args.smoke
+    reef_skip_perfect_score = False
+    reference_workers = 1 if args.smoke else MAX_WORKERS
     plan = {
         "cells": selected_cells,
         "seeds": config.seeds,
@@ -112,7 +111,9 @@ def main() -> None:
             "pi_version": PI_VERSION if any(cell != "reference" for cell in selected_cells) else None,
         },
         "smoke": args.smoke,
-        "skip_perfect_score": skip_perfect_score,
+        "reference_skip_perfect_score": False,
+        "reference_workers": reference_workers,
+        "reef_skip_perfect_score": reef_skip_perfect_score,
         "planned_task_evaluations": planned_task_evaluations(
             selected_cells,
             len(config.seeds),
@@ -144,7 +145,9 @@ def main() -> None:
             "schema_version": 1,
             "smoke": args.smoke,
             "budget": budget,
-            "skip_perfect_score": skip_perfect_score,
+            "reference_skip_perfect_score": False,
+            "reference_workers": reference_workers,
+            "reef_skip_perfect_score": reef_skip_perfect_score,
             "task_model": config.task_model,
             "reflection_model": config.reflection_model,
             "base_url": config.base_url,
@@ -179,7 +182,7 @@ def main() -> None:
                     cell_dir,
                     api_key,
                     ledger,
-                    skip_perfect_score,
+                    reference_workers,
                     identity_sha256,
                 )
             elif cell == "frozen":
@@ -197,7 +200,7 @@ def main() -> None:
                     args.pi_binary,
                     cell,
                     ledger,
-                    skip_perfect_score,
+                    reef_skip_perfect_score,
                     identity_sha256,
                 )
     # Full examples (including held-out answers) are retained only after every
@@ -220,49 +223,116 @@ def run_reference(
     output_dir,
     api_key,
     ledger,
-    skip_perfect_score,
+    max_workers,
     identity_sha256,
 ) -> None:
-    task = TrackedChatModel(
-        ModelBinding(config.base_url, config.task_model, api_key=api_key),
+    task = TrackedDSPyLM(
+        config.task_model,
+        api_key=api_key,
+        base_url=config.base_url,
+        temperature=TASK_TEMPERATURE,
+        max_tokens=TASK_MAX_TOKENS,
         price=TASK_MODEL_PRICE,
         spend_guard=ledger,
         usage_path=output_dir / "task-usage.json",
     )
-    reflection = TrackedChatModel(
-        ModelBinding(config.base_url, config.reflection_model, api_key=api_key),
+    reflection = TrackedGEPALM(
+        config.reflection_model,
+        api_key=api_key,
+        base_url=config.base_url,
         price=REFLECTION_MODEL_PRICE,
         spend_guard=ledger,
         usage_path=output_dir / "reflection-usage.json",
     )
-    adapter = DefaultAdapter(model=task, evaluator=ExactAIMEEvaluator())
-    callback = EvidenceCallback(output_dir / "events.jsonl")
-    outcome = run_sealed_search(
-        seed_candidate={"system_prompt": RULES_SEED},
-        trainset=trainset,
-        valset=valset,
-        testset=testset,
-        adapter=adapter,
-        reflection_lm=reflection,
-        max_metric_calls=budget,
-        seed=seed,
-        run_dir=output_dir / "search",
-        callbacks=[callback],
-        heldout_evaluator=CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints"),
-        skip_perfect_score=skip_perfect_score,
+    dspy.configure(lm=task)
+    started = time.monotonic()
+    result = optimize_anything(
+        seed_candidate=OFFICIAL_SEED_PROMPT,
+        evaluator=evaluate_official_aime,
+        dataset=list(trainset),
+        valset=list(valset),
+        config=OptimizeAnythingConfig(
+            engine="gepa",
+            max_evals=budget,
+            max_concurrency=max_workers,
+            output_dir=next_engine_attempt(output_dir / "engine"),
+            run_dir=str(output_dir / "search"),
+            engine_config={
+                "engine": {
+                    "seed": seed,
+                    "track_best_outputs": True,
+                    "parallel": True,
+                    "max_workers": max_workers,
+                    "cache_evaluation": True,
+                },
+                "reflection": {
+                    "reflection_lm": reflection,
+                },
+            },
+        ),
+    )
+    promotion = decide_promotion(result)
+    selected = _string_candidate(result, promotion.candidate_idx)
+    heldout = CheckpointedHeldoutEvaluator(
+        OfficialAIMEAdapter(),
+        output_dir / "heldout-checkpoints",
+        max_workers=16,
+        failure_score=0.0,
+    )
+    frozen_test = heldout.evaluate("frozen", testset, OFFICIAL_SEED_PROMPT)
+    selected_test = heldout.evaluate("selected", testset, selected)
+    outcome = SealedSearchOutcome(
+        result=result,
+        promotion=promotion,
+        frozen_test_scores=tuple(frozen_test.scores),
+        selected_test_scores=tuple(selected_test.scores),
+        frozen_test_outputs=tuple(frozen_test.outputs),
+        selected_test_outputs=tuple(selected_test.outputs),
+        wall_time_s=time.monotonic() - started,
     )
     write_search_report(
         output_dir=output_dir,
         cell="reference",
         seed=seed,
         outcome=outcome,
-        config=report_config(config, budget, seed, "reference", skip_perfect_score),
+        config={
+            **report_config(config, budget, seed, "reference", False),
+            "solver": "dspy.ChainOfThought",
+            "temperature": TASK_TEMPERATURE,
+            "max_tokens": TASK_MAX_TOKENS,
+            "parallel": True,
+            "max_workers": max_workers,
+            "heldout_workers": 16,
+            "cache_evaluation": True,
+            "seed_prompt": OFFICIAL_SEED_PROMPT,
+        },
         task_usage=task.usage.snapshot(),
         reflection_usage=reflection.usage.snapshot(),
         task_price=TASK_MODEL_PRICE,
         reflection_price=REFLECTION_MODEL_PRICE,
     )
     mark_done(output_dir, "reference", seed, identity_sha256)
+
+
+def _string_candidate(result, index: int) -> str:
+    key = result._str_candidate_key
+    candidate = result.candidates[index]
+    if key is None or key not in candidate:
+        raise RuntimeError("official string candidate was not preserved by GEPA")
+    return candidate[key]
+
+
+def next_engine_attempt(root: Path) -> Path:
+    """Keep outer eval-server records from separate resume attempts disjoint."""
+    root.mkdir(parents=True, exist_ok=True)
+    indices = []
+    for path in root.glob("attempt-*"):
+        suffix = path.name.removeprefix("attempt-")
+        if suffix.isdigit():
+            indices.append(int(suffix))
+    attempt = root / f"attempt-{max(indices, default=-1) + 1:04d}"
+    attempt.mkdir()
+    return attempt
 
 
 def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger, identity_sha256) -> None:
@@ -402,6 +472,10 @@ def report_config(
         "base_url": config.base_url,
         "api_key_env": config.api_key_env,
         "gepa_commit": GEPA_COMMIT,
+        "revisions": {
+            "AI-MO/aimo-validation-aime": AIME_TRAIN_REVISION,
+            "MathArena/aime_2025": AIME_TEST_REVISION,
+        },
         "pi_version": PI_VERSION,
         "skip_perfect_score": skip_perfect_score,
     }
@@ -470,7 +544,7 @@ def _command_output(command: list[str]) -> str:
 def write_dataset_manifest(path: Path, trainset, valset, testset) -> None:
     splits = {"train": trainset, "validation": valset, "test": testset}
     payload = {
-        "source": "gepa.examples.aime.init_dataset()",
+        "source": "gepa examples/aime_math/utils.py::load_math_dataset()",
         "gepa_commit": GEPA_COMMIT,
         "sha256": dataset_sha256(trainset, valset, testset),
         "sizes": {name: len(items) for name, items in splits.items()},

@@ -11,6 +11,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
+import dspy
+from gepa.lm import LM as GEPALM
+
 from reef.harness.model_binding import ModelBinding, ModelBindingError
 
 
@@ -62,7 +65,7 @@ REFLECTION_MODEL_PRICE = ModelPrice(
     input_per_million=1.25,
     cached_input_per_million=0.125,
     output_per_million=10.00,
-    source="https://developers.openai.com/api/docs/models/gpt-5",
+    source="https://developers.openai.com/api/docs/models/gpt-5.1",
 )
 
 
@@ -198,6 +201,114 @@ class TrackedChatModel:
     @property
     def total_tokens_out(self) -> int:
         return self.usage.total_tokens_out
+
+
+class TrackedDSPyLM(dspy.LM):
+    """The official DSPy solver LM with persistent usage and a spend guard."""
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str,
+        base_url: str,
+        temperature: float,
+        max_tokens: int,
+        price: ModelPrice,
+        spend_guard: CostGuard | None = None,
+        usage_path: Path | None = None,
+    ) -> None:
+        super().__init__(
+            f"openai/{model}",
+            api_key=api_key,
+            api_base=f"{base_url.rstrip('/')}/v1",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            cache=True,
+        )
+        self.usage = UsageLedger(price, usage_path)
+        self._spend_guard = spend_guard
+
+    def forward(self, prompt=None, messages=None, **kwargs):
+        if self._spend_guard is not None:
+            self._spend_guard.before_call()
+        response = super().forward(prompt=prompt, messages=messages, **kwargs)
+        if getattr(response, "cache_hit", False):
+            return response
+        payload = response.model_dump() if hasattr(response, "model_dump") else response
+        if not isinstance(payload, Mapping):
+            raise ModelBindingError("DSPy returned a non-mapping model response")
+        usage = self.usage.add_openai_response(payload)
+        if self._spend_guard is not None:
+            self._spend_guard.record_call(self.usage.price.estimate(usage))
+        return response
+
+
+class TrackedGEPALM(GEPALM):
+    """Upstream GEPA LM transport with Reef's persistent accounting hooks."""
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str,
+        base_url: str,
+        price: ModelPrice,
+        spend_guard: CostGuard | None = None,
+        usage_path: Path | None = None,
+    ) -> None:
+        super().__init__(
+            f"openai/{model}",
+            api_key=api_key,
+            api_base=f"{base_url.rstrip('/')}/v1",
+        )
+        self.usage = UsageLedger(price, usage_path)
+        self._spend_guard = spend_guard
+        self._tracking_lock = threading.Lock()
+
+    def __call__(self, prompt: str | list[dict[str, Any]]) -> str:
+        if self._spend_guard is not None:
+            self._spend_guard.before_call()
+        with self._tracking_lock:
+            before_in = self.total_tokens_in
+            before_out = self.total_tokens_out
+            before_cost = self.total_cost
+            result = super().__call__(prompt)
+            usage = self._record_upstream_usage(before_in, before_out, requests=1)
+            observed_cost = max(0.0, self.total_cost - before_cost)
+        if self._spend_guard is not None:
+            self._spend_guard.record_call(max(observed_cost, self.usage.price.estimate(usage)))
+        return result
+
+    def batch_complete(
+        self,
+        messages_list: list[list[dict[str, Any]]],
+        max_workers: int = 10,
+        **kwargs: Any,
+    ) -> list[str]:
+        if self._spend_guard is not None:
+            for _ in messages_list:
+                self._spend_guard.before_call()
+        with self._tracking_lock:
+            before_in = self.total_tokens_in
+            before_out = self.total_tokens_out
+            before_cost = self.total_cost
+            results = super().batch_complete(messages_list, max_workers=max_workers, **kwargs)
+            usage = self._record_upstream_usage(before_in, before_out, requests=len(results))
+            observed_cost = max(0.0, self.total_cost - before_cost)
+        if self._spend_guard is not None and results:
+            per_request = max(observed_cost, self.usage.price.estimate(usage)) / len(results)
+            for _ in results:
+                self._spend_guard.record_call(per_request)
+        return results
+
+    def _record_upstream_usage(self, before_in: int, before_out: int, *, requests: int) -> TokenUsage:
+        usage = empty_usage()
+        usage["requests"] = requests
+        usage["input_tokens"] = max(0, self.total_tokens_in - before_in)
+        usage["output_tokens"] = max(0, self.total_tokens_out - before_out)
+        self.usage.add(usage)
+        return usage
 
 
 def empty_usage() -> TokenUsage:

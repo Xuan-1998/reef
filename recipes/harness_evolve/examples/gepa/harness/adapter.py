@@ -231,6 +231,7 @@ class ReefCompositionAdapter:
             outputs=outputs,
             scores=scores,
             trajectories=trajectories,
+            objective_scores=[{"score": score} for score in scores],
             num_metric_calls=len(batch),
         )
 
