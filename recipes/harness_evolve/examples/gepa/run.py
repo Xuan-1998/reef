@@ -22,12 +22,15 @@ from harness.callbacks import EvidenceCallback
 from harness.config import (
     AIME_DATASET_SHA256,
     AIME_SPLIT_SIZES,
+    EXPERIMENT_SEEDS,
     GEPA_COMMIT,
     PI_VERSION,
     REEF_COMMIT,
+    SEARCH_BUDGET,
     ExperimentConfig,
 )
 from harness.data import RULES_SEED, dataset_sha256, load_aime_splits, multi_node_seed, rules_seed
+from harness.evidence import export_evidence
 from harness.heldout import CheckpointedHeldoutEvaluator
 from harness.models import REFLECTION_MODEL_PRICE, TASK_MODEL_PRICE, TrackedChatModel
 from harness.publication import publish_candidate
@@ -71,6 +74,12 @@ def parse_args() -> argparse.Namespace:
         help="Use two examples per split, an eight-call budget, and do not skip reflection on perfect samples",
     )
     parser.add_argument("--dry-run", action="store_true", help="Validate pins and print the plan without model calls")
+    parser.add_argument(
+        "--evidence-archive",
+        type=Path,
+        default=None,
+        help="After the exact full run, write a scrubbed tar.gz evidence archive outside the output directory",
+    )
     return parser.parse_args()
 
 
@@ -195,6 +204,10 @@ def main() -> None:
     # requested search cell has finished or was already marked complete.
     write_dataset_artifact(output_root / "dataset.json", trainset, valset, testset)
     write_aggregate_report(output_dir=output_root, cells=selected_cells, seeds=config.seeds)
+    if args.evidence_archive is not None:
+        if args.smoke or selected_cells != CELLS or config.seeds != EXPERIMENT_SEEDS or budget != SEARCH_BUDGET:
+            raise RuntimeError("evidence export requires the exact full all-cell, all-seed reproduction")
+        export_evidence(output_root, args.evidence_archive, api_key=api_key)
 
 
 def run_reference(

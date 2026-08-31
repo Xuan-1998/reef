@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import shutil
 import sys
+import tarfile
 from dataclasses import asdict
 from pathlib import Path
 from types import ModuleType
@@ -54,6 +56,14 @@ def data_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
         del sys.modules[name]
     return importlib.import_module("harness.data")
+
+
+@pytest.fixture
+def evidence_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
+    for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
+        del sys.modules[name]
+    return importlib.import_module("harness.evidence")
 
 
 @pytest.fixture
@@ -205,6 +215,7 @@ def test_rules_adapter_renders_binding_and_scores_a_realistic_pi_trace(adapter_m
 
 def test_rules_adapter_builds_component_specific_reflection_records(adapter_module):
     from gepa.core.adapter import EvaluationBatch
+
     from reef.harness.adapters import get_adapter
     from reef.harness.model_binding import ModelBinding
 
@@ -336,6 +347,72 @@ def test_completed_cell_requires_matching_identity_and_artifacts(runner_module, 
     (run_dir / "summary.json").write_text('{"tampered": true}\n', encoding="utf-8")
     with pytest.raises(RuntimeError, match="evidence changed"):
         runner_module.completed_cell(run_dir, "rules", 0, "identity")
+
+
+def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, tmp_path):
+    output_root = tmp_path / "full"
+    output_root.mkdir()
+    identity = "identity-sha"
+    root_payloads = {
+        "run-identity.json": {"sha256": identity},
+        "plan.json": {"kind": "full"},
+        "dataset-manifest.json": {"sha256": "dataset"},
+        "dataset.json": {"train": []},
+        "observed-cost.json": {"observed_cost_usd": 1.0},
+        "results.json": {"cells": {}},
+    }
+    for name, payload in root_payloads.items():
+        (output_root / name).write_text(json.dumps(payload) + "\n")
+    secret = "sk-test-1234567890abcdef"
+    for cell in evidence_module.CELLS:
+        for seed in evidence_module.SEEDS:
+            run_dir = output_root / cell / f"seed-{seed}"
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text("{}\n")
+            (run_dir / "config.json").write_text("{}\n")
+            (run_dir / "events.jsonl").write_text(json.dumps({"authorization": f"Bearer {secret}"}) + "\n")
+            search_dir = run_dir / "search"
+            search_dir.mkdir()
+            (search_dir / "candidates.json").write_text("{}\n")
+            (search_dir / "gepa_state.bin").write_bytes(b"excluded")
+            if cell != "reference":
+                (run_dir / "publication.json").write_text("{}\n")
+                tree = run_dir / "published-composition"
+                tree.mkdir()
+                (tree / "AGENTS.md").write_text("provider-free\n")
+            (run_dir / "done.json").write_text(
+                json.dumps(
+                    {
+                        "complete": True,
+                        "cell": cell,
+                        "seed": seed,
+                        "run_identity_sha256": identity,
+                    }
+                )
+                + "\n"
+            )
+
+    archive_path = tmp_path / "gepa-evidence.tar.gz"
+    exported = evidence_module.export_evidence(output_root, archive_path, api_key=secret)
+
+    assert hashlib.sha256(archive_path.read_bytes()).hexdigest() == exported["archive_sha256"]
+    assert archive_path.with_name(f"{archive_path.name}.sha256").is_file()
+    with tarfile.open(archive_path, "r:gz") as archive:
+        names = set(archive.getnames())
+        assert "gepa-evidence/evidence-manifest.json" in names
+        assert not any(name.endswith("gepa_state.bin") for name in names)
+        events = archive.extractfile("gepa-evidence/reference/seed-0/events.jsonl").read().decode()
+        assert secret not in events
+        assert "Bearer" not in events
+
+
+def test_evidence_export_refuses_missing_runs(evidence_module, tmp_path):
+    output_root = tmp_path / "incomplete"
+    output_root.mkdir()
+    (output_root / "run-identity.json").write_text('{"sha256":"identity"}\n')
+
+    with pytest.raises(RuntimeError, match="not complete"):
+        evidence_module.export_evidence(output_root, tmp_path / "evidence.tar.gz", api_key="")
 
 
 @pytest.mark.parametrize(
@@ -643,6 +720,7 @@ def test_multi_node_candidate_renders_rules_and_skill_as_one_composition(adapter
 
 def test_multi_node_reflection_records_name_the_selected_node_role(adapter_module):
     from gepa.core.adapter import EvaluationBatch
+
     from reef.harness.adapters import get_adapter
     from reef.harness.model_binding import ModelBinding
 
@@ -683,6 +761,7 @@ def test_multi_node_reflection_records_name_the_selected_node_role(adapter_modul
 
 def test_pinned_gepa_round_robin_evolves_both_nodes_in_the_complete_tree(adapter_module):
     from gepa import optimize
+
     from reef.harness.adapters import get_adapter
     from reef.harness.episode import EpisodeResult
     from reef.harness.model_binding import ModelBinding
