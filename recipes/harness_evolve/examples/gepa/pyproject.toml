@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reef-gepa-reproduction"
+version = "0.1.0"
+description = "Pinned GEPA reproduction over Reef harness compositions"
+requires-python = ">=3.10"
+dependencies = [
+    "gepa @ git+https://github.com/gepa-ai/gepa.git@92dadfffbe98c8ecf508179a1cab09c1bb85cd32",
+]
+
+[project.optional-dependencies]
+reference = [
+    "datasets>=2.14.6",
+    "litellm>=1.83.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["harness*"]
