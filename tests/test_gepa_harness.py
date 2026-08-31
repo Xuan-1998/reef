@@ -385,6 +385,50 @@ def test_search_forwards_smoke_only_perfect_score_policy(search_module, monkeypa
     assert policies == [True, False]
 
 
+def test_smoke_policy_reflects_on_a_perfect_training_minibatch(search_module, tmp_path):
+    from gepa.core.adapter import EvaluationBatch
+
+    reflection_prompts = []
+
+    class PerfectAdapter:
+        propose_new_texts = None
+
+        def evaluate(self, batch, candidate, capture_traces=False):
+            trajectories = [{"input": item["input"]} for item in batch] if capture_traces else None
+            return EvaluationBatch(
+                outputs=[{"rules": candidate["rules"]} for _ in batch],
+                scores=[1.0 for _ in batch],
+                trajectories=trajectories,
+                num_metric_calls=len(batch),
+            )
+
+        def make_reflective_dataset(self, candidate, eval_batch, components_to_update):
+            return {
+                component: [{"Feedback": "refine even though this sample passed"}]
+                for component in components_to_update
+            }
+
+    def reflection_lm(prompt):
+        reflection_prompts.append(prompt)
+        return "refined rules"
+
+    outcome = search_module.run_sealed_search(
+        seed_candidate={"rules": "seed rules"},
+        trainset=[{"input": f"train-{index}", "answer": "### 1"} for index in range(3)],
+        valset=[{"input": "validation", "answer": "### 1"}],
+        testset=[{"input": "test", "answer": "### 1"}],
+        adapter=PerfectAdapter(),
+        reflection_lm=reflection_lm,
+        max_metric_calls=5,
+        seed=0,
+        run_dir=tmp_path / "perfect-smoke",
+        skip_perfect_score=False,
+    )
+
+    assert reflection_prompts
+    assert outcome.result.candidates == [{"rules": "seed rules"}]
+
+
 def test_pinned_gepa_checkpoint_resumes_without_replaying_work(search_module, tmp_path):
     from gepa import optimize
     from gepa.core.adapter import EvaluationBatch
