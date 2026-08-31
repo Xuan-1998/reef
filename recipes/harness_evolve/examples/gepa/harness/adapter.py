@@ -283,6 +283,7 @@ class ReefRulesAdapter(ReefCompositionAdapter):
         timeout_s: float = 600.0,
         episode_runner: EpisodeRunner = run_episode,
         spend_guard: CostGuard | None = None,
+        usage_path: Path | None = None,
     ) -> None:
         super().__init__(
             descriptor=descriptor,
@@ -292,6 +293,7 @@ class ReefRulesAdapter(ReefCompositionAdapter):
             timeout_s=timeout_s,
             episode_runner=episode_runner,
             spend_guard=spend_guard,
+            usage_path=usage_path,
         )
 
 

@@ -40,6 +40,15 @@ def search_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.fixture
+def runner_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
+    sys.modules.pop("run", None)
+    for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
+        del sys.modules[name]
+    return importlib.import_module("run")
+
+
+@pytest.fixture
 def models_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(EXAMPLE_DIR))
     for name in [name for name in sys.modules if name == "harness" or name.startswith("harness.")]:
@@ -246,6 +255,33 @@ def test_rules_adapter_builds_component_specific_reflection_records(adapter_modu
             }
         ]
     }
+
+
+def test_rules_cell_driver_persists_usage_before_search(runner_module, tmp_path, monkeypatch):
+    class SearchReached(RuntimeError):
+        pass
+
+    def stop_before_search(**kwargs):
+        assert kwargs["adapter"].usage.path == (tmp_path / "task-usage.json").resolve()
+        raise SearchReached
+
+    monkeypatch.setattr(runner_module, "run_sealed_search", stop_before_search)
+
+    with pytest.raises(SearchReached):
+        runner_module.run_reef_search(
+            runner_module.ExperimentConfig(seeds=(0,)),
+            [{"input": "train", "answer": "### 1"}],
+            [{"input": "validation", "answer": "### 1"}],
+            [{"input": "test", "answer": "### 1"}],
+            8,
+            0,
+            tmp_path,
+            "dummy",
+            "fake-pi",
+            "rules",
+            None,
+            False,
+        )
 
 
 @pytest.mark.parametrize(
