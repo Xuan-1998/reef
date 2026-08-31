@@ -204,6 +204,11 @@ artifact publication.
 
 ## Results
 
-No paid result is recorded yet. A full result belongs here only after seed 0
-under an approved spend cap; neutral or negative deltas are reported
-unchanged.
+The full direct-reference seed-0
+[`results/reference-full-2026-08-31`](results/reference-full-2026-08-31/README.md)
+run matched the pinned official 45/45/30 AIME splits and 32-worker reference
+configuration for $4.6539113. It configured the official 500-call budget and
+recorded 504 evaluations because the final parallel wave was already in
+flight. GEPA promoted a candidate that improved validation from 44.44% to
+51.11%; frozen and selected prompts both scored 43.33% on the sealed test
+split, so the held-out delta is reported as 0.

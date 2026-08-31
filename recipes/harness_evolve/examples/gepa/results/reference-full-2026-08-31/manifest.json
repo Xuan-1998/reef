@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "run_kind": "official_reference_full",
+  "completed_at": "2026-08-31T23:52:33Z",
+  "source": {
+    "reef_source_commit": "f92c2df1fd5008499adb779a636621b59c5aa9b3",
+    "reef_source_dirty": false,
+    "gepa_commit": "67da814e33328e6714c3636428d03c86adb66cd7",
+    "official_example": "https://github.com/gepa-ai/gepa/tree/67da814e33328e6714c3636428d03c86adb66cd7/examples/aime_math"
+  },
+  "configuration": {
+    "cell": "reference",
+    "seed": 0,
+    "solver": "dspy.ChainOfThought",
+    "seed_prompt": "Solve the math problem carefully. Break down the steps and provide the final answer as a single number.",
+    "selected_prompt": "Solve the math problem carefully. Show clear, logically ordered work, but keep it as concise as possible. Verify key conditions and edge cases. Use theorems or known results when they simplify the solution, and double-check that your final result matches all constraints. Provide the final answer as a single number on its own line at the end.",
+    "skip_perfect_score": false,
+    "cache_evaluation": true,
+    "search_metric_call_budget": 500,
+    "search_workers": 32,
+    "heldout_workers": 16,
+    "task_model": "gpt-4.1-mini-2025-04-14",
+    "task_temperature": 1.0,
+    "task_max_tokens": 32000,
+    "reflection_model": "gpt-5.1-2025-11-13",
+    "max_observed_cost_usd": 10.0
+  },
+  "dataset": {
+    "source": "gepa examples/aime_math/utils.py::load_math_dataset()",
+    "train_revision": "13f9e12f613e720c2a2b2f345dd04b998a29494d",
+    "test_revision": "c94da77eb22bbd6439e62a323bec18493a421302",
+    "sha256": "0ee1433b0a5ecc4e7875004af026662a9137eb6ff30b8ffb081f139713e9c2e9",
+    "sizes": {
+      "train": 45,
+      "validation": 45,
+      "test": 30
+    }
+  },
+  "outcome": {
+    "total_metric_calls": 504,
+    "num_registered_candidates": 4,
+    "candidate_validation_scores": [
+      0.4444444444444444,
+      0.4444444444444444,
+      0.5111111111111111,
+      0.4666666666666667
+    ],
+    "selected_candidate_index": 2,
+    "seed_validation_score": 0.4444444444444444,
+    "selected_validation_score": 0.5111111111111111,
+    "validation_delta": 0.06666666666666671,
+    "pareto_validation_coverage": 0.6888888888888889,
+    "promoted": true,
+    "promotion_reason": "candidate 2 strictly improved aggregate validation score from 0.444444 to 0.511111",
+    "frozen_test_score": 0.43333333333333335,
+    "selected_test_score": 0.43333333333333335,
+    "test_delta": 0.0,
+    "heldout_items_with_different_correctness": 4,
+    "wall_time_s": 8055.847253374988,
+    "resume_check": "completed_cell_skipped_without_additional_model_calls"
+  },
+  "usage": {
+    "completed_guarded_calls": 539,
+    "task_requests": 485,
+    "reflection_requests": 54,
+    "task_input_tokens": 197048,
+    "task_cached_input_tokens": 0,
+    "task_output_tokens": 2036656,
+    "reflection_input_tokens": 960154,
+    "reflection_output_tokens": 11625,
+    "reflection_reasoning_tokens": 0,
+    "estimated_task_cost_usd": 3.3374688000000003,
+    "estimated_reflection_cost_usd": 1.3164425,
+    "estimated_total_cost_usd": 4.653911300000001
+  },
+  "run_identity_sha256": "3d98d40de52ad17a102cb5aaf1640c9fe76873dbaac6e78ebffa425e39492afc",
+  "source_file_sha256": {
+    "dataset-manifest.json": "0927ceab184ee6002d23dc4c6f86cda66bea0acb169c06d295871c9f0b3d560d",
+    "config.json": "e81575646c3a75cc6a2fb0668a752542378919b5a04d09da240d267c00a853c0",
+    "summary.json": "c40b6aaac64651400c97f46f71e62a7432b025cc5b044544b8cf7fcf325fdf34",
+    "results.json": "cd021591def88c40d034d307fbb3c5ac723da116e80912b093aaaa4e962741b9",
+    "raw_result.json": "d980e88213bebeee5dced7d4598785ad4fa57ffa50271004bcd3a825d2450db9",
+    "selected_candidate.json": "0791aa369b309ebc922da1d193f907f30fa50e445d54aca0780a353e76c30dda",
+    "search/run_log.txt": "5a702e10dbc3781f451c8e4d881cc9d658e01c4b46ea5e280d4aadb79ac280c3",
+    "done.json": "e5b54fe90f72f6c41ee8c39da91e9873eb0baccf890b9af1403545c97427231f"
+  },
+  "limitations": [
+    "This is one seed and does not estimate variance across runs.",
+    "The selected prompt improved validation but tied the frozen prompt on the sealed held-out split.",
+    "Only the direct official-reference cell was exercised; the frozen, rules-only, and multi-node Reef cells were not part of this run.",
+    "The configured 500 metric-call budget recorded 504 calls because a final concurrent wave was already in flight."
+  ]
+}
