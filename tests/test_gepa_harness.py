@@ -350,6 +350,41 @@ def test_test_split_is_unsealed_only_after_upstream_search_returns(search_module
     assert outcome.selected_test_score == 1.0
 
 
+def test_search_forwards_smoke_only_perfect_score_policy(search_module, monkeypatch, tmp_path):
+    from gepa.core.adapter import EvaluationBatch
+
+    policies = []
+
+    def optimize(**kwargs):
+        policies.append(kwargs["skip_perfect_score"])
+        return gepa_result(candidates=[{"rules": "seed"}], scores=[0.0], fronts={0: {0}})
+
+    class Adapter:
+        def evaluate(self, batch, candidate, capture_traces=False):
+            return EvaluationBatch(outputs=[{} for _ in batch], scores=[0.0 for _ in batch])
+
+    monkeypatch.setattr(search_module.gepa, "optimize", optimize)
+    common = {
+        "seed_candidate": {"rules": "seed"},
+        "trainset": [{"input": "train", "answer": "### 1"}],
+        "valset": [{"input": "validation", "answer": "### 2"}],
+        "testset": [{"input": "test", "answer": "### 3"}],
+        "adapter": Adapter(),
+        "reflection_lm": None,
+        "max_metric_calls": 8,
+        "seed": 0,
+    }
+
+    search_module.run_sealed_search(**common, run_dir=tmp_path / "full")
+    search_module.run_sealed_search(
+        **common,
+        run_dir=tmp_path / "smoke",
+        skip_perfect_score=False,
+    )
+
+    assert policies == [True, False]
+
+
 def test_pinned_gepa_checkpoint_resumes_without_replaying_work(search_module, tmp_path):
     from gepa import optimize
     from gepa.core.adapter import EvaluationBatch

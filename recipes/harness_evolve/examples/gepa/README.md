@@ -76,6 +76,11 @@ OPENAI_API_KEY=... REEF_PI_BINARY=/path/to/pi \
   --max-observed-cost-usd 5 --output-dir outputs/smoke
 ```
 
+Smoke mode sets upstream GEPA's `skip_perfect_score=False` so the reflection
+path is still attempted when both tiny sampled training examples happen to
+score perfectly. The plan and per-cell configuration record this setting.
+The exact full reproduction preserves GEPA's `True` default.
+
 Run the exact four-cell reproduction only after setting an account-side spend
 limit and reviewing the projected budget:
 

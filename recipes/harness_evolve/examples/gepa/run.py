@@ -58,7 +58,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Required for live runs; stops before a new call after recorded cost reaches this value",
     )
-    parser.add_argument("--smoke", action="store_true", help="Use two examples per split and an eight-call budget")
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Use two examples per split, an eight-call budget, and do not skip reflection on perfect samples",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Validate pins and print the plan without model calls")
     return parser.parse_args()
 
@@ -73,6 +77,7 @@ def main() -> None:
         verify_pi_pin(args.pi_binary)
 
     output_root = args.output_dir or HERE / "outputs" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    skip_perfect_score = not args.smoke
     plan = {
         "cells": selected_cells,
         "seeds": config.seeds,
@@ -90,6 +95,7 @@ def main() -> None:
             "pi_version": PI_VERSION if any(cell != "reference" for cell in selected_cells) else None,
         },
         "smoke": args.smoke,
+        "skip_perfect_score": skip_perfect_score,
         "planned_task_evaluations": planned_task_evaluations(
             selected_cells,
             len(config.seeds),
@@ -126,7 +132,18 @@ def main() -> None:
                 print(f"skip completed cell {cell} seed {seed}: {cell_dir}")
                 continue
             if cell == "reference":
-                run_reference(config, trainset, valset, testset, budget, seed, cell_dir, api_key, ledger)
+                run_reference(
+                    config,
+                    trainset,
+                    valset,
+                    testset,
+                    budget,
+                    seed,
+                    cell_dir,
+                    api_key,
+                    ledger,
+                    skip_perfect_score,
+                )
             elif cell == "frozen":
                 run_frozen(config, testset, seed, cell_dir, api_key, args.pi_binary, ledger)
             else:
@@ -142,6 +159,7 @@ def main() -> None:
                     args.pi_binary,
                     cell,
                     ledger,
+                    skip_perfect_score,
                 )
     # Full examples (including held-out answers) are retained only after every
     # requested search cell has finished or was already marked complete.
@@ -149,7 +167,9 @@ def main() -> None:
     write_aggregate_report(output_dir=output_root, cells=selected_cells, seeds=config.seeds)
 
 
-def run_reference(config, trainset, valset, testset, budget, seed, output_dir, api_key, ledger) -> None:
+def run_reference(
+    config, trainset, valset, testset, budget, seed, output_dir, api_key, ledger, skip_perfect_score
+) -> None:
     task = TrackedChatModel(
         ModelBinding(config.base_url, config.task_model, api_key=api_key),
         price=TASK_MODEL_PRICE,
@@ -176,13 +196,14 @@ def run_reference(config, trainset, valset, testset, budget, seed, output_dir, a
         run_dir=output_dir / "search",
         callbacks=[callback],
         heldout_evaluator=CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints"),
+        skip_perfect_score=skip_perfect_score,
     )
     write_search_report(
         output_dir=output_dir,
         cell="reference",
         seed=seed,
         outcome=outcome,
-        config=report_config(config, budget, seed, "reference"),
+        config=report_config(config, budget, seed, "reference", skip_perfect_score),
         task_usage=task.usage.snapshot(),
         reflection_usage=reflection.usage.snapshot(),
         task_price=TASK_MODEL_PRICE,
@@ -220,7 +241,7 @@ def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger) ->
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     (output_dir / "config.json").write_text(
-        json.dumps(report_config(config, 0, seed, "frozen"), indent=2, sort_keys=True) + "\n"
+        json.dumps(report_config(config, 0, seed, "frozen", None), indent=2, sort_keys=True) + "\n"
     )
     publish_candidate(
         adapter=adapter,
@@ -233,7 +254,18 @@ def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger) ->
 
 
 def run_reef_search(
-    config, trainset, valset, testset, budget, seed, output_dir, api_key, pi_binary, cell, ledger
+    config,
+    trainset,
+    valset,
+    testset,
+    budget,
+    seed,
+    output_dir,
+    api_key,
+    pi_binary,
+    cell,
+    ledger,
+    skip_perfect_score,
 ) -> None:
     binding = ModelBinding(config.base_url, config.task_model, api_key=api_key)
     if cell == "rules":
@@ -274,13 +306,14 @@ def run_reef_search(
         run_dir=output_dir / "search",
         callbacks=[callback],
         heldout_evaluator=CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints"),
+        skip_perfect_score=skip_perfect_score,
     )
     write_search_report(
         output_dir=output_dir,
         cell=cell,
         seed=seed,
         outcome=outcome,
-        config=report_config(config, budget, seed, cell),
+        config=report_config(config, budget, seed, cell, skip_perfect_score),
         task_usage=adapter.usage.snapshot(),
         reflection_usage=reflection.usage.snapshot(),
         task_price=TASK_MODEL_PRICE,
@@ -303,7 +336,9 @@ def run_reef_search(
     mark_done(output_dir)
 
 
-def report_config(config: ExperimentConfig, budget: int, seed: int, cell: str) -> dict[str, Any]:
+def report_config(
+    config: ExperimentConfig, budget: int, seed: int, cell: str, skip_perfect_score: bool | None
+) -> dict[str, Any]:
     return {
         "cell": cell,
         "seed": seed,
@@ -314,6 +349,7 @@ def report_config(config: ExperimentConfig, budget: int, seed: int, cell: str) -
         "api_key_env": config.api_key_env,
         "gepa_commit": GEPA_COMMIT,
         "pi_version": PI_VERSION,
+        "skip_perfect_score": skip_perfect_score,
     }
 
 

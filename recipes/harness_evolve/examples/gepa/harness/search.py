@@ -94,6 +94,7 @@ def run_sealed_search(
     custom_candidate_proposer: Callable[..., dict[str, str]] | None = None,
     callbacks: list[Any] | None = None,
     heldout_evaluator: HeldoutEvaluator | None = None,
+    skip_perfect_score: bool = True,
 ) -> SealedSearchOutcome:
     """Run upstream GEPA, gate on validation, then and only then touch test.
 
@@ -122,6 +123,7 @@ def run_sealed_search(
         track_best_outputs=True,
         cache_evaluation=False,
         callbacks=callbacks,
+        skip_perfect_score=skip_perfect_score,
     )
     promotion = decide_promotion(result)
     selected_candidate = result.candidates[promotion.candidate_idx]
