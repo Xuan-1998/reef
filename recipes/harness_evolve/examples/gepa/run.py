@@ -488,13 +488,15 @@ def completed_cell(output_dir: Path, cell: str, seed: int, identity_sha256: str)
         "run_identity_sha256": identity_sha256,
     }
     observed = read_json_object(marker)
-    if observed != expected:
+    if any(observed.get(key) != value for key, value in expected.items()):
         raise RuntimeError(f"completed cell marker does not match this run: {marker}")
-    for name in ("summary.json", "config.json"):
-        if not (output_dir / name).is_file():
-            raise RuntimeError(f"completed cell is missing {name}: {output_dir}")
-    if cell != "reference" and not (output_dir / "publication.json").is_file():
-        raise RuntimeError(f"completed cell is missing publication.json: {output_dir}")
+    hashes = observed.get("files")
+    if not isinstance(hashes, dict) or hashes != cell_evidence_hashes(output_dir):
+        raise RuntimeError(f"completed cell evidence changed after completion: {output_dir}")
+    if cell != "reference":
+        publication = read_json_object(output_dir / "publication.json")
+        if not Path(str(publication.get("repository") or "")).is_dir():
+            raise RuntimeError(f"completed cell artifact repository is unavailable: {output_dir}")
     return True
 
 
@@ -506,8 +508,20 @@ def mark_done(output_dir: Path, cell: str, seed: int, identity_sha256: str) -> N
             "cell": cell,
             "seed": seed,
             "run_identity_sha256": identity_sha256,
+            "files": cell_evidence_hashes(output_dir),
         },
     )
+
+
+def cell_evidence_hashes(output_dir: Path) -> dict[str, str]:
+    excluded_roots = {"artifacts.git", "artifact-work", "artifact-cache"}
+    hashes = {}
+    for path in sorted(output_dir.rglob("*")):
+        relative = path.relative_to(output_dir)
+        if not path.is_file() or path.name == "done.json" or excluded_roots.intersection(relative.parts):
+            continue
+        hashes[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
 
 
 def write_once_json(path: Path, payload: dict[str, Any], label: str) -> None:

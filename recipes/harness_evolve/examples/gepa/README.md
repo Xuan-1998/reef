@@ -109,7 +109,9 @@ Reusing the same explicit output directory resumes GEPA checkpoints and skips
 cells whose `done.json` marker and required reports match the immutable run
 identity. Changing smoke mode, budget, model, source commit, dependency pin, or
 dataset pin requires a new output directory. Cell, seed, and spend-cap choices
-may be staged across invocations of the same compatible run.
+may be staged across invocations of the same compatible run. Finish staged
+work with the exact all-cell, all-seed command so `plan.json` and `results.json`
+are regenerated for the authoritative comparison.
 Task and reflection token totals are also written after every completed call
 to each cell's `task-usage.json` and `reflection-usage.json`, so reports include
 calls completed before a restart rather than only the final process's usage.
@@ -117,7 +119,9 @@ Held-out evaluations write one atomic result per example under each cell's
 `heldout-checkpoints/` directory. A restart skips completed examples in both
 the frozen and selected batches. A process failure after a provider call
 finishes but before its checkpoint is written can still repeat that one call,
-so the account-side project budget remains necessary.
+so the account-side project budget remains necessary. Each `done.json` hashes
+every retained cell file outside transient Git work/cache directories; changed
+or incomplete evidence is refused instead of being silently skipped.
 
 ## Retained results
 

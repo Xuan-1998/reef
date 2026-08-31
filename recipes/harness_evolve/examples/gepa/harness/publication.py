@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -52,33 +54,40 @@ def publish_candidate(
         work_dir=output_dir / "artifact-work",
         cache_dir=output_dir / "artifact-cache",
     )
-    retained_metadata = {
-        **metadata,
+    publication_identity = {
+        "method": "gepa",
+        "scenario": scenario,
         "reproduction_candidate_sha256": candidate_sha256,
         "reproduction_render_sha256": render_sha256,
     }
     existing_metadata = backend.metadata()
-    if existing_metadata is not None:
-        if (
-            existing_metadata.get("reproduction_candidate_sha256") != candidate_sha256
-            or existing_metadata.get("reproduction_render_sha256") != render_sha256
-        ):
+    if existing_metadata is None:
+        parent = backend.fork(metadata={**publication_identity, "publication_state": "pending"})
+    else:
+        if any(existing_metadata.get(key) != value for key, value in publication_identity.items()):
             raise RuntimeError("existing artifact publication does not match the selected candidate")
-        published = backend.current()
-        manifest = _manifest_payload(
-            published.version,
-            published.parent_version,
-            repository_path,
-            files,
-            scenario,
-            candidate_sha256,
-            render_sha256,
-        )
-        _write_json_atomic(manifest_path, manifest)
-        return _published_composition(manifest)
+        state = existing_metadata.get("publication_state")
+        if state == "published":
+            published = backend.current()
+            manifest = _manifest_payload(
+                published.version,
+                published.parent_version,
+                repository_path,
+                files,
+                scenario,
+                candidate_sha256,
+                render_sha256,
+            )
+            _write_json_atomic(manifest_path, manifest)
+            return _published_composition(manifest)
+        if state != "pending":
+            raise RuntimeError(f"unknown artifact publication state {state!r}")
+        parent = backend.current()
 
-    parent = backend.fork(metadata={"method": "gepa", "scenario": scenario})
-    local = Artifact.local(tree_dir, metadata=retained_metadata)
+    local = Artifact.local(
+        tree_dir,
+        metadata={**metadata, **publication_identity, "publication_state": "published"},
+    )
     published = backend.publish(local, expected_parent=parent)
 
     manifest = _manifest_payload(
@@ -95,17 +104,27 @@ def publish_candidate(
 
 
 def _ensure_tree(root: Path, files: Mapping[str, str]) -> None:
-    if not root.exists():
-        root.mkdir(parents=True)
-        _write_tree(root, files)
+    if root.exists():
+        observed = {
+            path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+        if observed != dict(files):
+            raise RuntimeError("existing published composition does not match the selected candidate")
         return
-    observed = {
-        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
-        for path in root.rglob("*")
-        if path.is_file()
-    }
-    if observed != dict(files):
-        raise RuntimeError("existing published composition does not match the selected candidate")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{root.name}-", dir=root.parent))
+    try:
+        _write_tree(temporary, files)
+        try:
+            temporary.rename(root)
+        except OSError:
+            if not root.is_dir():
+                raise
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+    _ensure_tree(root, files)
 
 
 def _mapping_sha256(value: Mapping[str, str]) -> str:

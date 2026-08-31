@@ -323,13 +323,19 @@ def test_run_identity_refuses_incompatible_resume(runner_module, tmp_path):
 def test_completed_cell_requires_matching_identity_and_artifacts(runner_module, tmp_path):
     run_dir = tmp_path / "rules" / "seed-0"
     run_dir.mkdir(parents=True)
-    for name in ("summary.json", "config.json", "publication.json"):
+    for name in ("summary.json", "config.json"):
         (run_dir / name).write_text("{}\n", encoding="utf-8")
+    repository = run_dir / "artifacts.git"
+    repository.mkdir()
+    (run_dir / "publication.json").write_text(json.dumps({"repository": str(repository)}) + "\n")
     runner_module.mark_done(run_dir, "rules", 0, "identity")
 
     assert runner_module.completed_cell(run_dir, "rules", 0, "identity")
     with pytest.raises(RuntimeError, match="does not match"):
         runner_module.completed_cell(run_dir, "rules", 0, "different")
+    (run_dir / "summary.json").write_text('{"tampered": true}\n', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="evidence changed"):
+        runner_module.completed_cell(run_dir, "rules", 0, "identity")
 
 
 @pytest.mark.parametrize(
@@ -930,6 +936,92 @@ def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module,
 
     assert recovered.artifact_version == published.artifact_version
     assert (tmp_path / "durable" / "publication.json").is_file()
+
+
+def test_publication_recovers_from_pending_fork(adapter_module, publication_module, monkeypatch, tmp_path):
+    from reef.artifacts.artifact import ArtifactRef
+    from reef.harness.adapters import get_adapter
+    from reef.harness.model_binding import ModelBinding
+
+    state = {"metadata": None, "current": None, "publish_calls": 0}
+
+    class Backend:
+        def __init__(self, scenario, repository, **kwargs):
+            Path(repository).mkdir(parents=True, exist_ok=True)
+
+        def metadata(self):
+            return state["metadata"]
+
+        def current(self):
+            return state["current"]
+
+        def fork(self, metadata):
+            state["metadata"] = dict(metadata)
+            state["current"] = ArtifactRef("pending", "pending-version", "initial-version")
+            return state["current"]
+
+        def publish(self, artifact, expected_parent):
+            state["publish_calls"] += 1
+            if state["publish_calls"] == 1:
+                raise RuntimeError("interrupted after fork")
+            state["metadata"] = dict(artifact.metadata)
+            state["current"] = ArtifactRef("published", "published-version", expected_parent.version)
+            return state["current"]
+
+    monkeypatch.setattr(publication_module, "GitLFSRepositoryBackend", Backend)
+    adapter = adapter_module.ReefRulesAdapter(
+        descriptor=get_adapter("pi"),
+        task_model=ModelBinding("http://model.test", "task-model", api_key="transient"),
+        episode_runner=lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted after fork"):
+        publication_module.publish_candidate(
+            adapter=adapter,
+            candidate={"rules": "published rules"},
+            output_dir=tmp_path / "pending",
+            scenario="gepa-pending-smoke",
+            metadata={"kind": "test"},
+        )
+    recovered = publication_module.publish_candidate(
+        adapter=adapter,
+        candidate={"rules": "published rules"},
+        output_dir=tmp_path / "pending",
+        scenario="gepa-pending-smoke",
+        metadata={"kind": "test"},
+    )
+
+    assert recovered.artifact_version == "published-version"
+    assert state["publish_calls"] == 2
+    assert state["metadata"]["publication_state"] == "published"
+
+
+def test_publication_tree_is_staged_atomically(adapter_module, publication_module, monkeypatch, tmp_path):
+    from reef.harness.adapters import get_adapter
+    from reef.harness.model_binding import ModelBinding
+
+    adapter = adapter_module.ReefRulesAdapter(
+        descriptor=get_adapter("pi"),
+        task_model=ModelBinding("http://model.test", "task-model", api_key="transient"),
+        episode_runner=lambda *args, **kwargs: None,
+    )
+
+    def interrupt_tree(root, files):
+        next(iter(files.items()))
+        (root / "partial.txt").write_text("partial")
+        raise RuntimeError("interrupted tree render")
+
+    monkeypatch.setattr(publication_module, "_write_tree", interrupt_tree)
+    with pytest.raises(RuntimeError, match="interrupted tree render"):
+        publication_module.publish_candidate(
+            adapter=adapter,
+            candidate={"rules": "published rules"},
+            output_dir=tmp_path / "atomic",
+            scenario="gepa-atomic-smoke",
+            metadata={"kind": "test"},
+        )
+
+    assert not (tmp_path / "atomic" / "published-composition").exists()
 
 
 def test_completed_cells_are_aggregated_without_hiding_negative_results(reporting_module, tmp_path):
