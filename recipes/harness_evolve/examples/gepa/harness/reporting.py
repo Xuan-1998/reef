@@ -128,24 +128,6 @@ def _normalize_run(cell: str, seed: int, summary: Mapping[str, Any]) -> dict[str
     }
 
 
-def collect_harness_usage(
-    result: GEPAResult[Any, Any], heldout_outputs: Sequence[Mapping[str, Any]]
-) -> dict[str, int]:
-    """Aggregate Pi usage retained in GEPA best outputs and held-out calls."""
-    usages: list[Mapping[str, int]] = []
-    for output in heldout_outputs:
-        usage = output.get("usage")
-        if isinstance(usage, Mapping):
-            usages.append(usage)
-    best = result.best_outputs_valset or {}
-    for outputs in best.values():
-        for _, output in outputs:
-            if isinstance(output, Mapping) and isinstance(output.get("usage"), Mapping):
-                usages.append(output["usage"])
-    keys = ("requests", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens")
-    return {key: sum(int(usage.get(key, 0)) for usage in usages) for key in keys}
-
-
 def _learning_curve(result: GEPAResult[Any, Any]) -> list[dict[str, Any]]:
     return [
         {

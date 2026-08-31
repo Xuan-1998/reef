@@ -14,7 +14,6 @@ dependencies = [
 [project.optional-dependencies]
 reference = [
     "datasets>=2.14.6",
-    "litellm>=1.83.0",
 ]
 
 [tool.setuptools.packages.find]
