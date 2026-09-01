@@ -28,6 +28,7 @@ from harness.config import (
     AIME_TRAIN_REVISION,
     EXPERIMENT_SEEDS,
     GEPA_COMMIT,
+    HELDOUT_WORKERS,
     MAX_WORKERS,
     PI_VERSION,
     REEF_COMMIT,
@@ -113,6 +114,8 @@ def main() -> None:
         "smoke": args.smoke,
         "reference_skip_perfect_score": False,
         "reference_workers": reference_workers,
+        "reef_workers": MAX_WORKERS,
+        "reef_heldout_workers": HELDOUT_WORKERS,
         "reef_skip_perfect_score": reef_skip_perfect_score,
         "planned_task_evaluations": planned_task_evaluations(
             selected_cells,
@@ -147,6 +150,8 @@ def main() -> None:
             "budget": budget,
             "reference_skip_perfect_score": False,
             "reference_workers": reference_workers,
+            "reef_workers": MAX_WORKERS,
+            "reef_heldout_workers": HELDOUT_WORKERS,
             "reef_skip_perfect_score": reef_skip_perfect_score,
             "task_model": config.task_model,
             "reflection_model": config.reflection_model,
@@ -341,14 +346,17 @@ def run_frozen(config, testset, seed, output_dir, api_key, pi_binary, ledger, id
         task_model=ModelBinding(config.base_url, config.task_model, api_key=api_key),
         components=MULTI_NODE_COMPONENTS,
         binary=pi_binary,
+        max_workers=MAX_WORKERS,
         spend_guard=ledger,
         usage_path=output_dir / "task-usage.json",
     )
     candidate = multi_node_seed()
     started = datetime.now(timezone.utc)
-    evaluated = CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints").evaluate(
-        "frozen", testset, candidate
-    )
+    evaluated = CheckpointedHeldoutEvaluator(
+        adapter,
+        output_dir / "heldout-checkpoints",
+        max_workers=HELDOUT_WORKERS,
+    ).evaluate("frozen", testset, candidate)
     score = sum(evaluated.scores) / len(evaluated.scores)
     usage = adapter.usage.snapshot()
     summary = {
@@ -397,6 +405,7 @@ def run_reef_search(
             descriptor=get_adapter("pi"),
             task_model=binding,
             binary=pi_binary,
+            max_workers=MAX_WORKERS,
             spend_guard=ledger,
             usage_path=output_dir / "task-usage.json",
         )
@@ -407,6 +416,7 @@ def run_reef_search(
             task_model=binding,
             components=MULTI_NODE_COMPONENTS,
             binary=pi_binary,
+            max_workers=MAX_WORKERS,
             spend_guard=ledger,
             usage_path=output_dir / "task-usage.json",
         )
@@ -429,7 +439,11 @@ def run_reef_search(
         seed=seed,
         run_dir=output_dir / "search",
         callbacks=[callback],
-        heldout_evaluator=CheckpointedHeldoutEvaluator(adapter, output_dir / "heldout-checkpoints"),
+        heldout_evaluator=CheckpointedHeldoutEvaluator(
+            adapter,
+            output_dir / "heldout-checkpoints",
+            max_workers=HELDOUT_WORKERS,
+        ),
         skip_perfect_score=skip_perfect_score,
     )
     write_search_report(
@@ -477,6 +491,8 @@ def report_config(
             "MathArena/aime_2025": AIME_TEST_REVISION,
         },
         "pi_version": PI_VERSION,
+        "search_workers": MAX_WORKERS,
+        "heldout_workers": HELDOUT_WORKERS,
         "skip_perfect_score": skip_perfect_score,
     }
 

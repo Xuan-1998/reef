@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -118,12 +120,15 @@ class ReefCompositionAdapter:
         components: Sequence[TextComponent],
         binary: str | None = None,
         timeout_s: float = 600.0,
+        max_workers: int = 1,
         episode_runner: EpisodeRunner = run_episode,
         spend_guard: CostGuard | None = None,
         usage_path: Path | None = None,
     ) -> None:
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
+        if max_workers <= 0:
+            raise ValueError("evaluation max_workers must be positive")
         if not components:
             raise ValueError("composition adapter requires at least one text component")
         component_keys = [component.key for component in components]
@@ -135,6 +140,7 @@ class ReefCompositionAdapter:
         self._components_by_key = {component.key: component for component in self.components}
         self.binary = binary
         self.timeout_s = timeout_s
+        self.max_workers = max_workers
         self._episode_runner = episode_runner
         self._spend_guard = spend_guard
         self._binding_nodes = task_model.compose_nodes(descriptor)
@@ -160,72 +166,18 @@ class ReefCompositionAdapter:
         capture_traces: bool = False,
     ) -> EvaluationBatch[HarnessTrajectory, HarnessRollout]:
         files = self.render_episode_candidate(candidate)
-        outputs: list[HarnessRollout] = []
-        scores: list[float] = []
-        trajectories: list[HarnessTrajectory] | None = [] if capture_traces else None
+        evaluate = partial(self._evaluate_example, files, capture_traces=capture_traces)
+        if self.max_workers == 1 or len(batch) <= 1:
+            evaluated = [evaluate(example) for example in batch]
+        else:
+            with ThreadPoolExecutor(max_workers=min(self.max_workers, len(batch))) as executor:
+                evaluated = list(executor.map(evaluate, batch))
 
-        for raw_example in batch:
-            task, expected = _validate_example(raw_example)
-            observed_cost_usd = 0.0
-            if self._spend_guard is not None:
-                self._spend_guard.before_call()
-            try:
-                result = self._episode_runner(
-                    self.descriptor,
-                    files,
-                    task,
-                    binary=self.binary,
-                    timeout=self.timeout_s,
-                )
-                assistant_response = final_assistant_text(result.trajectory) or result.stdout
-                score = (
-                    score_aime_answer(expected, assistant_response)
-                    if result.exit_code == 0 and not result.residue
-                    else 0.0
-                )
-                feedback = _feedback(expected, assistant_response, result)
-                output: HarnessRollout = {
-                    "assistant_response": assistant_response,
-                    "exit_code": result.exit_code,
-                    "stderr": result.stderr,
-                    "residue": list(result.residue),
-                    "usage": trajectory_usage(result.trajectory),
-                }
-                observed_cost_usd = TASK_MODEL_PRICE.estimate(output["usage"])
-                events = [dict(event) for event in result.trajectory]
-            except (EpisodeError, TrajectoryError) as exc:
-                assistant_response = ""
-                score = 0.0
-                feedback = f"The harness episode failed before producing a gradeable answer: {exc}"
-                output = {
-                    "assistant_response": "",
-                    "exit_code": -1,
-                    "stderr": str(exc),
-                    "residue": [],
-                    "usage": empty_usage(),
-                }
-                events = []
-            finally:
-                if self._spend_guard is not None:
-                    self._spend_guard.record_call(observed_cost_usd)
-
-            outputs.append(output)
-            self.usage.add(output["usage"])
-            scores.append(score)
-            if trajectories is not None:
-                trajectories.append(
-                    {
-                        "input": task,
-                        "expected_answer": expected,
-                        "assistant_response": assistant_response,
-                        "feedback": feedback,
-                        "exit_code": output["exit_code"],
-                        "stderr": output["stderr"],
-                        "residue": output["residue"],
-                        "events": events,
-                        "usage": output["usage"],
-                    }
-                )
+        outputs = [output for output, _, _ in evaluated]
+        scores = [score for _, score, _ in evaluated]
+        trajectories = (
+            [trajectory for _, _, trajectory in evaluated if trajectory is not None] if capture_traces else None
+        )
 
         return EvaluationBatch(
             outputs=outputs,
@@ -234,6 +186,72 @@ class ReefCompositionAdapter:
             objective_scores=[{"score": score} for score in scores],
             num_metric_calls=len(batch),
         )
+
+    def _evaluate_example(
+        self,
+        files: Mapping[str, str],
+        raw_example: AIMEExample,
+        capture_traces: bool,
+    ) -> tuple[HarnessRollout, float, HarnessTrajectory | None]:
+        task, expected = _validate_example(raw_example)
+        observed_cost_usd = 0.0
+        if self._spend_guard is not None:
+            self._spend_guard.before_call()
+        try:
+            result = self._episode_runner(
+                self.descriptor,
+                files,
+                task,
+                binary=self.binary,
+                timeout=self.timeout_s,
+            )
+            assistant_response = final_assistant_text(result.trajectory) or result.stdout
+            score = (
+                score_aime_answer(expected, assistant_response)
+                if result.exit_code == 0 and not result.residue
+                else 0.0
+            )
+            feedback = _feedback(expected, assistant_response, result)
+            output: HarnessRollout = {
+                "assistant_response": assistant_response,
+                "exit_code": result.exit_code,
+                "stderr": result.stderr,
+                "residue": list(result.residue),
+                "usage": trajectory_usage(result.trajectory),
+            }
+            observed_cost_usd = TASK_MODEL_PRICE.estimate(output["usage"])
+            events = [dict(event) for event in result.trajectory]
+        except (EpisodeError, TrajectoryError) as exc:
+            assistant_response = ""
+            score = 0.0
+            feedback = f"The harness episode failed before producing a gradeable answer: {exc}"
+            output = {
+                "assistant_response": "",
+                "exit_code": -1,
+                "stderr": str(exc),
+                "residue": [],
+                "usage": empty_usage(),
+            }
+            events = []
+        finally:
+            if self._spend_guard is not None:
+                self._spend_guard.record_call(observed_cost_usd)
+
+        self.usage.add(output["usage"])
+        trajectory: HarnessTrajectory | None = None
+        if capture_traces:
+            trajectory = {
+                "input": task,
+                "expected_answer": expected,
+                "assistant_response": assistant_response,
+                "feedback": feedback,
+                "exit_code": output["exit_code"],
+                "stderr": output["stderr"],
+                "residue": output["residue"],
+                "events": events,
+                "usage": output["usage"],
+            }
+        return output, score, trajectory
 
     def make_reflective_dataset(
         self,
@@ -282,6 +300,7 @@ class ReefRulesAdapter(ReefCompositionAdapter):
         task_model: ModelBinding,
         binary: str | None = None,
         timeout_s: float = 600.0,
+        max_workers: int = 1,
         episode_runner: EpisodeRunner = run_episode,
         spend_guard: CostGuard | None = None,
         usage_path: Path | None = None,
@@ -292,6 +311,7 @@ class ReefRulesAdapter(ReefCompositionAdapter):
             components=RULES_ONLY_COMPONENTS,
             binary=binary,
             timeout_s=timeout_s,
+            max_workers=max_workers,
             episode_runner=episode_runner,
             spend_guard=spend_guard,
             usage_path=usage_path,

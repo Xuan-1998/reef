@@ -224,6 +224,58 @@ def test_rules_adapter_renders_binding_and_scores_a_realistic_pi_trace(adapter_m
     assert guard.events == ["before", ("record", 0.0)]
 
 
+def test_rules_adapter_evaluates_batch_with_configured_concurrency(adapter_module):
+    import threading
+
+    from reef.harness.adapters import get_adapter
+    from reef.harness.episode import EpisodeResult
+    from reef.harness.model_binding import ModelBinding
+
+    barrier = threading.Barrier(2)
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def run(descriptor, files, prompt, **kwargs):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        try:
+            barrier.wait(timeout=5)
+            answer = "1" if prompt == "first" else "2"
+            return EpisodeResult(
+                exit_code=0,
+                stdout="",
+                stderr="",
+                trajectory=({"role": "assistant", "content": f"### {answer}"},),
+                residue=(),
+            )
+        finally:
+            with lock:
+                active -= 1
+
+    adapter = adapter_module.ReefRulesAdapter(
+        descriptor=get_adapter("pi"),
+        task_model=ModelBinding("http://model.test", "task-model"),
+        max_workers=2,
+        episode_runner=run,
+    )
+
+    evaluated = adapter.evaluate(
+        [
+            {"input": "first", "answer": "### 1"},
+            {"input": "second", "answer": "### 2"},
+        ],
+        {"rules": "seed"},
+        capture_traces=True,
+    )
+
+    assert maximum_active == 2
+    assert evaluated.scores == [1.0, 1.0]
+    assert [trajectory["input"] for trajectory in evaluated.trajectories] == ["first", "second"]
+
+
 def test_rules_adapter_builds_component_specific_reflection_records(adapter_module):
     from gepa.core.adapter import EvaluationBatch
 
@@ -294,6 +346,8 @@ def test_rules_cell_driver_persists_usage_before_search(runner_module, tmp_path,
 
     def stop_before_search(**kwargs):
         assert kwargs["adapter"].usage.path == (tmp_path / "task-usage.json").resolve()
+        assert kwargs["adapter"].max_workers == runner_module.MAX_WORKERS
+        assert kwargs["heldout_evaluator"].max_workers == runner_module.HELDOUT_WORKERS
         raise SearchReached
 
     monkeypatch.setattr(runner_module, "run_sealed_search", stop_before_search)
