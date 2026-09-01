@@ -377,7 +377,9 @@ def test_completed_cell_requires_matching_identity_and_artifacts(runner_module, 
         runner_module.completed_cell(run_dir, "rules", 0, "identity")
 
 
-def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, config_module, tmp_path):
+def test_evidence_export_is_complete_scrubbed_and_checksummed(
+    evidence_module, config_module, monkeypatch, tmp_path
+):
     assert evidence_module.SEEDS == config_module.EXPERIMENT_SEEDS
     output_root = tmp_path / "full"
     output_root.mkdir()
@@ -409,17 +411,14 @@ def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, c
                 tree = run_dir / "published-composition"
                 tree.mkdir()
                 (tree / "AGENTS.md").write_text("provider-free\n")
-            (run_dir / "done.json").write_text(
-                json.dumps(
-                    {
-                        "complete": True,
-                        "cell": cell,
-                        "seed": seed,
-                        "run_identity_sha256": identity,
-                    }
-                )
-                + "\n"
-            )
+            marker = {
+                "complete": True,
+                "cell": cell,
+                "seed": seed,
+                "run_identity_sha256": identity,
+                "files": evidence_module._cell_evidence_hashes(run_dir),
+            }
+            (run_dir / "done.json").write_text(json.dumps(marker) + "\n")
 
     archive_path = tmp_path / "gepa-evidence.tar.gz"
     exported = evidence_module.export_evidence(output_root, archive_path, api_key=secret)
@@ -433,6 +432,21 @@ def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, c
         events = archive.extractfile("gepa-evidence/reference/seed-0/events.jsonl").read().decode()
         assert secret not in events
         assert "Bearer" not in events
+
+    failed_archive = tmp_path / "failed.tar.gz"
+
+    def fail_archive(*args, **kwargs):
+        raise RuntimeError("archive interrupted")
+
+    monkeypatch.setattr(evidence_module.tarfile, "open", fail_archive)
+    with pytest.raises(RuntimeError, match="archive interrupted"):
+        evidence_module.export_evidence(output_root, failed_archive, api_key=secret)
+    assert not failed_archive.exists()
+    assert not failed_archive.with_name(f"{failed_archive.name}.sha256").exists()
+
+    (output_root / "reference" / "seed-0" / "summary.json").write_text('{"changed": true}\n')
+    with pytest.raises(RuntimeError, match="files changed after completion"):
+        evidence_module.export_evidence(output_root, tmp_path / "changed.tar.gz", api_key=secret)
 
 
 def test_evidence_export_refuses_missing_runs(evidence_module, tmp_path):

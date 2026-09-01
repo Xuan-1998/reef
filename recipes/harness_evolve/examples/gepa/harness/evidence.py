@@ -78,11 +78,25 @@ def export_evidence(output_root: Path, archive_path: Path, *, api_key: str) -> d
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        with tarfile.open(archive_path, "w:gz") as archive:
+        temporary_archive = Path(temporary) / archive_path.name
+        temporary_sidecar = Path(temporary) / sidecar_path.name
+        with tarfile.open(temporary_archive, "w:gz") as archive:
             archive.add(staging, arcname=staging.name)
-
-    archive_sha256 = hashlib.sha256(archive_path.read_bytes()).hexdigest()
-    sidecar_path.write_text(f"{archive_sha256}  {archive_path.name}\n", encoding="utf-8")
+        archive_sha256 = hashlib.sha256(temporary_archive.read_bytes()).hexdigest()
+        temporary_sidecar.write_text(f"{archive_sha256}  {archive_path.name}\n", encoding="utf-8")
+        archive_published = False
+        sidecar_published = False
+        try:
+            temporary_archive.replace(archive_path)
+            archive_published = True
+            temporary_sidecar.replace(sidecar_path)
+            sidecar_published = True
+        except BaseException:
+            if sidecar_published:
+                sidecar_path.unlink(missing_ok=True)
+            if archive_published:
+                archive_path.unlink(missing_ok=True)
+            raise
     return {
         "archive": str(archive_path),
         "archive_sha256": archive_sha256,
@@ -107,11 +121,24 @@ def _verify_complete_runs(output_root: Path, identity_sha256: str) -> None:
                 or marker.get("run_identity_sha256") != identity_sha256
             ):
                 raise RuntimeError(f"run is not complete for evidence export: {run_dir}")
+            hashes = marker.get("files")
+            if not isinstance(hashes, dict) or hashes != _cell_evidence_hashes(run_dir):
+                raise RuntimeError(f"run files changed after completion: {run_dir}")
             missing = sorted(name for name in required if not (run_dir / name).is_file())
             if cell != "reference" and not (run_dir / "publication.json").is_file():
                 missing.append("publication.json")
             if missing:
                 raise RuntimeError(f"run evidence is incomplete at {run_dir}: {missing}")
+
+
+def _cell_evidence_hashes(run_dir: Path) -> dict[str, str]:
+    hashes = {}
+    for path in sorted(run_dir.rglob("*")):
+        relative = path.relative_to(run_dir)
+        if not path.is_file() or path.name == "done.json" or _EXCLUDED_PARTS.intersection(relative.parts):
+            continue
+        hashes[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
 
 
 def _selected_sources(output_root: Path) -> list[Path]:
