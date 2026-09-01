@@ -6,6 +6,10 @@ direct reference cell. It used the official 45-example train split,
 DSPy `ChainOfThought` solver, 500-metric-call search budget, and 32 search
 workers.
 
+The run predates the repository migration. Its source pin remains the original
+[`reef-archive` commit](https://github.com/Human-Agent-Society/reef-archive/commit/f92c2df1fd5008499adb779a636621b59c5aa9b3)
+rather than being relabeled as a commit in the current repository.
+
 ## Observed result
 
 - The frozen prompt scored 20/45 (44.44%) on validation.
@@ -28,18 +32,18 @@ workers.
 
 ## Interpretation
 
-This is positive reproduction evidence for the implementation: it exercises
+This positively verifies the implementation: it exercises
 the pinned DSPy solver, integer metric and feedback, GPT-5.1 reflection,
 subsample rejection, full-validation acceptance, hybrid Pareto retention,
 strict validation-only promotion, sealed held-out comparison, accounting, and
 restart-safe completion under the official example settings.
 
-It is not evidence that this one optimized prompt improves AIME test accuracy.
+It does not show that this one optimized prompt improves AIME test accuracy.
 The validation gain did not transfer to the held-out split, and one seed is not
 enough to estimate a stable quality effect. The neutral held-out result is
 reported unchanged.
 
-## Stored evidence
+## Stored artifacts
 
 `manifest.json` records source and dataset pins, configuration, candidate and
 gate outcomes, scores, measured usage and cost, resume behavior, and SHA-256

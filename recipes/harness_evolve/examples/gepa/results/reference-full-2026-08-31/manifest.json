@@ -4,6 +4,7 @@
   "completed_at": "2026-08-31T23:52:33Z",
   "source": {
     "reef_source_commit": "f92c2df1fd5008499adb779a636621b59c5aa9b3",
+    "reef_source_url": "https://github.com/Human-Agent-Society/reef-archive/commit/f92c2df1fd5008499adb779a636621b59c5aa9b3",
     "reef_source_dirty": false,
     "gepa_commit": "67da814e33328e6714c3636428d03c86adb66cd7",
     "official_example": "https://github.com/gepa-ai/gepa/tree/67da814e33328e6714c3636428d03c86adb66cd7/examples/aime_math"

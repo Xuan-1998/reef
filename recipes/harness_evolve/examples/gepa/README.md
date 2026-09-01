@@ -125,7 +125,7 @@ the frozen and selected batches. A process failure after a provider call
 finishes but before its checkpoint is written can still repeat that one call,
 so the account-side project budget remains necessary. Each `done.json` hashes
 every retained cell file outside transient Git work/cache directories; changed
-or incomplete evidence is refused instead of being silently skipped.
+or incomplete result bundles are refused instead of being silently skipped.
 
 ## Retained results
 
