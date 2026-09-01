@@ -11,14 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from reef.artifact.artifact import Artifact
-from reef.artifact.git_lfs import GitLFSRepositoryBackend
+from reef.artifact import Artifact, GitLFSRepositoryBackend
 
 from .adapter import ReefCompositionAdapter
 
 
 @dataclass(frozen=True)
 class PublishedComposition:
+    content_id: str
     release_id: str
     parent_release_id: str | None
     repository: str
@@ -33,7 +33,7 @@ def publish_candidate(
     scenario: str,
     metadata: Mapping[str, Any],
 ) -> PublishedComposition:
-    """Render without model credentials and publish a durable Reef version."""
+    """Render without model credentials and publish a durable Reef release."""
     output_dir = Path(output_dir)
     tree_dir = output_dir / "published-composition"
     files = adapter.render_candidate(candidate)
@@ -70,6 +70,7 @@ def publish_candidate(
         if state == "published":
             published = backend.current()
             manifest = _manifest_payload(
+                published.content_id,
                 published.release_id,
                 published.parent_release_id,
                 repository_path,
@@ -91,6 +92,7 @@ def publish_candidate(
     published = backend.publish(local, expected_parent=parent)
 
     manifest = _manifest_payload(
+        published.content_id,
         published.release_id,
         published.parent_release_id,
         repository_path,
@@ -133,6 +135,7 @@ def _mapping_sha256(value: Mapping[str, str]) -> str:
 
 
 def _manifest_payload(
+    content_id: str,
     release_id: str,
     parent_release_id: str | None,
     repository_path: Path,
@@ -142,6 +145,7 @@ def _manifest_payload(
     render_sha256: str,
 ) -> dict[str, Any]:
     return {
+        "content_id": content_id,
         "release_id": release_id,
         "parent_release_id": parent_release_id,
         "repository": str(repository_path),
@@ -181,6 +185,7 @@ def _validate_manifest(
 
 def _published_composition(manifest: Mapping[str, Any]) -> PublishedComposition:
     return PublishedComposition(
+        content_id=str(manifest["content_id"]),
         release_id=str(manifest["release_id"]),
         parent_release_id=(
             str(manifest["parent_release_id"]) if manifest.get("parent_release_id") is not None else None

@@ -141,7 +141,7 @@ Each search cell retains:
 - task/reflection token usage, wall time, and an estimated USD cost using the
   price snapshot recorded in the report; and
 - the selected provider-free composition as a durable Reef Git-LFS artifact
-  with its version and parent version.
+  with its content, release, and parent-release identities.
 
 After every requested seed finishes, the output root also receives a
 `results.json` comparison with per-run scores, mean held-out deltas, sample

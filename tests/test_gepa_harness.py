@@ -1159,10 +1159,10 @@ def test_observed_cost_ledger_persists_and_stops_before_the_next_call(budget_mod
         resumed.before_call()
 
 
-def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
+def test_publication_uses_reef_release_identities_and_excludes_transient_model_binding(
     adapter_module, publication_module, monkeypatch, tmp_path
 ):
-    from reef.artifact.artifact import ArtifactRef
+    from reef.artifact import ArtifactRef
     from reef.harness.adapters import get_adapter
     from reef.harness.model_binding import ModelBinding
 
@@ -1175,7 +1175,7 @@ def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
 
         def fork(self, metadata):
             observed["fork_metadata"] = metadata
-            return ArtifactRef("parent", "parent-version", None)
+            return ArtifactRef("parent-content", "parent-release", None)
 
         def metadata(self):
             return None
@@ -1184,7 +1184,7 @@ def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
             observed["expected_parent"] = expected_parent
             observed["models"] = (artifact.local_path / "pi-agent" / "models.json").read_text()
             observed["metadata"] = dict(artifact.metadata)
-            return ArtifactRef("selected", "selected-release", expected_parent.release_id)
+            return ArtifactRef("selected-content", "selected-release", expected_parent.release_id)
 
     monkeypatch.setattr(publication_module, "GitLFSRepositoryBackend", Backend)
     adapter = adapter_module.ReefCompositionAdapter(
@@ -1202,8 +1202,9 @@ def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
         metadata={"score": 1.0},
     )
 
+    assert published.content_id == "selected-content"
     assert published.release_id == "selected-release"
-    assert published.parent_release_id == "parent-version"
+    assert published.parent_release_id == "parent-release"
     assert json.loads(observed["models"]) == {}
     published_text = "".join(
         path.read_text() for path in (tmp_path / "result" / "published-composition").rglob("*") if path.is_file()
@@ -1234,6 +1235,7 @@ def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module,
         metadata={"kind": "test"},
     )
 
+    assert published.content_id.startswith("content:")
     assert len(published.release_id) == 40
     assert len(published.parent_release_id) == 40
     assert Path(published.repository).is_dir()
@@ -1248,12 +1250,13 @@ def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module,
         metadata={"kind": "test"},
     )
 
+    assert recovered.content_id == published.content_id
     assert recovered.release_id == published.release_id
     assert (tmp_path / "durable" / "publication.json").is_file()
 
 
 def test_publication_recovers_from_pending_fork(adapter_module, publication_module, monkeypatch, tmp_path):
-    from reef.artifact.artifact import ArtifactRef
+    from reef.artifact import ArtifactRef
     from reef.harness.adapters import get_adapter
     from reef.harness.model_binding import ModelBinding
 
@@ -1271,7 +1274,7 @@ def test_publication_recovers_from_pending_fork(adapter_module, publication_modu
 
         def fork(self, metadata):
             state["metadata"] = dict(metadata)
-            state["current"] = ArtifactRef("pending", "pending-version", "initial-version")
+            state["current"] = ArtifactRef("pending-content", "pending-release", "initial-release")
             return state["current"]
 
         def publish(self, artifact, expected_parent):
@@ -1279,7 +1282,7 @@ def test_publication_recovers_from_pending_fork(adapter_module, publication_modu
             if state["publish_calls"] == 1:
                 raise RuntimeError("interrupted after fork")
             state["metadata"] = dict(artifact.metadata)
-            state["current"] = ArtifactRef("published", "published-release", expected_parent.release_id)
+            state["current"] = ArtifactRef("published-content", "published-release", expected_parent.release_id)
             return state["current"]
 
     monkeypatch.setattr(publication_module, "GitLFSRepositoryBackend", Backend)
@@ -1305,6 +1308,7 @@ def test_publication_recovers_from_pending_fork(adapter_module, publication_modu
         metadata={"kind": "test"},
     )
 
+    assert recovered.content_id == "published-content"
     assert recovered.release_id == "published-release"
     assert state["publish_calls"] == 2
     assert state["metadata"]["publication_state"] == "published"
