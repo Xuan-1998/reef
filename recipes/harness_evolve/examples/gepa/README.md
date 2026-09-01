@@ -22,7 +22,7 @@ Reef and that held-out evaluation remains sealed until search completes.
 ## Exact pins
 
 - Reef:
-  [`8e2fcc30f81bc476e5f98e7dcaa37c2d879d8201`](https://github.com/Human-Agent-Society/reef/commit/8e2fcc30f81bc476e5f98e7dcaa37c2d879d8201)
+  [`6a5c88f0dceaa5113b3fcf75c87385e0bb3d6253`](https://github.com/Human-Agent-Society/reef/commit/6a5c88f0dceaa5113b3fcf75c87385e0bb3d6253)
 - GEPA:
   [`67da814e33328e6714c3636428d03c86adb66cd7`](https://github.com/gepa-ai/gepa/commit/67da814e33328e6714c3636428d03c86adb66cd7)
 - Pi: `0.84.2`

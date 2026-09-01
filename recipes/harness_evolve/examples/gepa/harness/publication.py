@@ -19,8 +19,8 @@ from .adapter import ReefCompositionAdapter
 
 @dataclass(frozen=True)
 class PublishedComposition:
-    artifact_version: str
-    parent_artifact_version: str | None
+    release_id: str
+    parent_release_id: str | None
     repository: str
     files: tuple[str, ...]
 
@@ -70,8 +70,8 @@ def publish_candidate(
         if state == "published":
             published = backend.current()
             manifest = _manifest_payload(
-                published.version,
-                published.parent_version,
+                published.release_id,
+                published.parent_release_id,
                 repository_path,
                 files,
                 scenario,
@@ -91,8 +91,8 @@ def publish_candidate(
     published = backend.publish(local, expected_parent=parent)
 
     manifest = _manifest_payload(
-        published.version,
-        published.parent_version,
+        published.release_id,
+        published.parent_release_id,
         repository_path,
         files,
         scenario,
@@ -133,8 +133,8 @@ def _mapping_sha256(value: Mapping[str, str]) -> str:
 
 
 def _manifest_payload(
-    artifact_version: str,
-    parent_artifact_version: str | None,
+    release_id: str,
+    parent_release_id: str | None,
     repository_path: Path,
     files: Mapping[str, str],
     scenario: str,
@@ -142,8 +142,8 @@ def _manifest_payload(
     render_sha256: str,
 ) -> dict[str, Any]:
     return {
-        "artifact_version": artifact_version,
-        "parent_artifact_version": parent_artifact_version,
+        "release_id": release_id,
+        "parent_release_id": parent_release_id,
         "repository": str(repository_path),
         "files": sorted(files),
         "scenario": scenario,
@@ -181,9 +181,9 @@ def _validate_manifest(
 
 def _published_composition(manifest: Mapping[str, Any]) -> PublishedComposition:
     return PublishedComposition(
-        artifact_version=str(manifest["artifact_version"]),
-        parent_artifact_version=(
-            str(manifest["parent_artifact_version"]) if manifest.get("parent_artifact_version") is not None else None
+        release_id=str(manifest["release_id"]),
+        parent_release_id=(
+            str(manifest["parent_release_id"]) if manifest.get("parent_release_id") is not None else None
         ),
         repository=str(manifest["repository"]),
         files=tuple(str(path) for path in manifest["files"]),

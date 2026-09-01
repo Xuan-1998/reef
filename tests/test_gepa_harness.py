@@ -117,7 +117,7 @@ def reporting_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 def test_reproduction_defaults_are_exact_and_secret_free(config_module):
     config = config_module.ExperimentConfig()
 
-    assert config_module.REEF_COMMIT == "8e2fcc30f81bc476e5f98e7dcaa37c2d879d8201"
+    assert config_module.REEF_COMMIT == "6a5c88f0dceaa5113b3fcf75c87385e0bb3d6253"
     assert config_module.GEPA_COMMIT == "67da814e33328e6714c3636428d03c86adb66cd7"
     assert config_module.PI_VERSION == "0.84.2"
     assert config_module.TASK_MODEL == "gpt-4.1-mini-2025-04-14"
@@ -377,9 +377,7 @@ def test_completed_cell_requires_matching_identity_and_artifacts(runner_module, 
         runner_module.completed_cell(run_dir, "rules", 0, "identity")
 
 
-def test_evidence_export_is_complete_scrubbed_and_checksummed(
-    evidence_module, config_module, monkeypatch, tmp_path
-):
+def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, config_module, monkeypatch, tmp_path):
     assert evidence_module.SEEDS == config_module.EXPERIMENT_SEEDS
     output_root = tmp_path / "full"
     output_root.mkdir()
@@ -1186,7 +1184,7 @@ def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
             observed["expected_parent"] = expected_parent
             observed["models"] = (artifact.local_path / "pi-agent" / "models.json").read_text()
             observed["metadata"] = dict(artifact.metadata)
-            return ArtifactRef("selected", "selected-version", expected_parent.version)
+            return ArtifactRef("selected", "selected-release", expected_parent.release_id)
 
     monkeypatch.setattr(publication_module, "GitLFSRepositoryBackend", Backend)
     adapter = adapter_module.ReefCompositionAdapter(
@@ -1204,8 +1202,8 @@ def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
         metadata={"score": 1.0},
     )
 
-    assert published.artifact_version == "selected-version"
-    assert published.parent_artifact_version == "parent-version"
+    assert published.release_id == "selected-release"
+    assert published.parent_release_id == "parent-version"
     assert json.loads(observed["models"]) == {}
     published_text = "".join(
         path.read_text() for path in (tmp_path / "result" / "published-composition").rglob("*") if path.is_file()
@@ -1236,8 +1234,8 @@ def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module,
         metadata={"kind": "test"},
     )
 
-    assert len(published.artifact_version) == 40
-    assert len(published.parent_artifact_version) == 40
+    assert len(published.release_id) == 40
+    assert len(published.parent_release_id) == 40
     assert Path(published.repository).is_dir()
     assert (tmp_path / "durable" / "publication.json").is_file()
 
@@ -1250,7 +1248,7 @@ def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module,
         metadata={"kind": "test"},
     )
 
-    assert recovered.artifact_version == published.artifact_version
+    assert recovered.release_id == published.release_id
     assert (tmp_path / "durable" / "publication.json").is_file()
 
 
@@ -1281,7 +1279,7 @@ def test_publication_recovers_from_pending_fork(adapter_module, publication_modu
             if state["publish_calls"] == 1:
                 raise RuntimeError("interrupted after fork")
             state["metadata"] = dict(artifact.metadata)
-            state["current"] = ArtifactRef("published", "published-version", expected_parent.version)
+            state["current"] = ArtifactRef("published", "published-release", expected_parent.release_id)
             return state["current"]
 
     monkeypatch.setattr(publication_module, "GitLFSRepositoryBackend", Backend)
@@ -1307,7 +1305,7 @@ def test_publication_recovers_from_pending_fork(adapter_module, publication_modu
         metadata={"kind": "test"},
     )
 
-    assert recovered.artifact_version == "published-version"
+    assert recovered.release_id == "published-release"
     assert state["publish_calls"] == 2
     assert state["metadata"]["publication_state"] == "published"
 

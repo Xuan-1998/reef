@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-REEF_COMMIT = "8e2fcc30f81bc476e5f98e7dcaa37c2d879d8201"
+REEF_COMMIT = "6a5c88f0dceaa5113b3fcf75c87385e0bb3d6253"
 GEPA_COMMIT = "67da814e33328e6714c3636428d03c86adb66cd7"
 PI_VERSION = "0.84.2"
 TASK_MODEL = "gpt-4.1-mini-2025-04-14"
