@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from reef.artifacts.artifact import Artifact
-from reef.artifacts.git_lfs import GitLFSRepositoryBackend
+from reef.artifact.artifact import Artifact
+from reef.artifact.git_lfs import GitLFSRepositoryBackend
 
 from .adapter import ReefCompositionAdapter
 

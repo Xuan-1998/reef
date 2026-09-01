@@ -1150,7 +1150,7 @@ def test_observed_cost_ledger_persists_and_stops_before_the_next_call(budget_mod
 def test_publication_uses_reef_versions_and_excludes_transient_model_binding(
     adapter_module, publication_module, monkeypatch, tmp_path
 ):
-    from reef.artifacts.artifact import ArtifactRef
+    from reef.artifact.artifact import ArtifactRef
     from reef.harness.adapters import get_adapter
     from reef.harness.model_binding import ModelBinding
 
@@ -1241,7 +1241,7 @@ def test_real_reef_git_lfs_publication_smoke(adapter_module, publication_module,
 
 
 def test_publication_recovers_from_pending_fork(adapter_module, publication_module, monkeypatch, tmp_path):
-    from reef.artifacts.artifact import ArtifactRef
+    from reef.artifact.artifact import ArtifactRef
     from reef.harness.adapters import get_adapter
     from reef.harness.model_binding import ModelBinding
 
