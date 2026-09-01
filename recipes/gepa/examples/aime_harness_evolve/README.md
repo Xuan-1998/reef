@@ -19,6 +19,34 @@ calls the task model directly, while the Reef cells run that model inside Pi.
 The implementation check is that the same GEPA search semantics operate through
 Reef and that held-out evaluation remains sealed until search completes.
 
+## Directory layout
+
+```text
+aime_harness_evolve/
+  harness/
+    adapter.py       named GEPA text components mapped to Reef nodes and Pi episodes
+    reference.py     pinned direct upstream AIME adapter and scorer
+    search.py        sealed search, promotion gate, and candidate selection
+    heldout.py       restart-safe frozen-versus-selected evaluation
+    models.py        tracked task and reflection model clients
+    budget.py        persistent observed-cost guard
+    reporting.py     per-cell and aggregate result writers
+    publication.py   provider-free Reef Git-LFS release
+  results/           small scrubbed result records retained in Git
+  run.py             four-cell experiment driver, resume checks, and export
+  run.sh             locked isolated launcher
+  pyproject.toml     exact upstream dependency declaration
+  uv.lock            resolved environment
+  README.md          this setup, protocol, and result interpretation
+```
+
+This is nested under `recipes/gepa/examples/` because upstream GEPA owns the
+search method and this directory is the runnable AIME-through-Reef experiment.
+It does not define a Reef `Recipe` or processor package. SkillClaw is flat at
+`recipes/skillclaw/` because it does define and ship that method package; both
+directories keep their runner, harness code, pins, results, and explanation
+together.
+
 ## Exact pins
 
 - Reef:
