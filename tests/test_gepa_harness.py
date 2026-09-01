@@ -14,7 +14,7 @@ from types import ModuleType
 
 import pytest
 
-EXAMPLE_DIR = Path(__file__).resolve().parents[1] / "recipes" / "harness_evolve" / "examples" / "gepa"
+EXAMPLE_DIR = Path(__file__).resolve().parents[1] / "recipes" / "gepa" / "examples" / "aime_harness_evolve"
 
 
 @pytest.fixture
