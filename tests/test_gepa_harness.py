@@ -431,16 +431,39 @@ def test_evidence_export_is_complete_scrubbed_and_checksummed(evidence_module, c
         assert secret not in events
         assert "Bearer" not in events
 
+    orphan_archive = tmp_path / "orphan-recovery.tar.gz"
+    orphan_sidecar = orphan_archive.with_name(f"{orphan_archive.name}.sha256")
+    orphan_sidecar.write_text("interrupted\n")
+    evidence_module.export_evidence(output_root, orphan_archive, api_key=secret)
+    assert orphan_archive.is_file()
+    assert orphan_sidecar.is_file()
+
     failed_archive = tmp_path / "failed.tar.gz"
 
     def fail_archive(*args, **kwargs):
         raise RuntimeError("archive interrupted")
 
-    monkeypatch.setattr(evidence_module.tarfile, "open", fail_archive)
-    with pytest.raises(RuntimeError, match="archive interrupted"):
-        evidence_module.export_evidence(output_root, failed_archive, api_key=secret)
+    with monkeypatch.context() as failure:
+        failure.setattr(evidence_module.tarfile, "open", fail_archive)
+        with pytest.raises(RuntimeError, match="archive interrupted"):
+            evidence_module.export_evidence(output_root, failed_archive, api_key=secret)
     assert not failed_archive.exists()
     assert not failed_archive.with_name(f"{failed_archive.name}.sha256").exists()
+
+    failed_pair = tmp_path / "failed-pair.tar.gz"
+    replace = Path.replace
+
+    def interrupt_archive_publish(path, target):
+        if Path(target) == failed_pair:
+            raise RuntimeError("archive publication interrupted")
+        return replace(path, target)
+
+    with monkeypatch.context() as failure:
+        failure.setattr(Path, "replace", interrupt_archive_publish)
+        with pytest.raises(RuntimeError, match="publication interrupted"):
+            evidence_module.export_evidence(output_root, failed_pair, api_key=secret)
+    assert not failed_pair.exists()
+    assert not failed_pair.with_name(f"{failed_pair.name}.sha256").exists()
 
     (output_root / "reference" / "seed-0" / "summary.json").write_text('{"changed": true}\n')
     with pytest.raises(RuntimeError, match="files changed after completion"):

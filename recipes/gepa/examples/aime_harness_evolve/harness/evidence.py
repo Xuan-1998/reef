@@ -36,8 +36,9 @@ def export_evidence(output_root: Path, archive_path: Path, *, api_key: str) -> d
     output_root = Path(output_root).resolve()
     archive_path = Path(archive_path).resolve()
     sidecar_path = archive_path.with_name(f"{archive_path.name}.sha256")
-    if archive_path.exists() or sidecar_path.exists():
+    if archive_path.exists():
         raise FileExistsError(f"evidence archive already exists: {archive_path}")
+    sidecar_path.unlink(missing_ok=True)
     try:
         archive_path.relative_to(output_root)
     except ValueError:
@@ -53,7 +54,7 @@ def export_evidence(output_root: Path, archive_path: Path, *, api_key: str) -> d
     sources = _selected_sources(output_root)
     archive_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="reef-gepa-evidence-") as temporary:
+    with tempfile.TemporaryDirectory(prefix=".reef-gepa-evidence-", dir=archive_path.parent) as temporary:
         staging = Path(temporary) / "gepa-evidence"
         checksums: dict[str, dict[str, Any]] = {}
         for source in sources:
@@ -87,10 +88,10 @@ def export_evidence(output_root: Path, archive_path: Path, *, api_key: str) -> d
         archive_published = False
         sidecar_published = False
         try:
-            temporary_archive.replace(archive_path)
-            archive_published = True
             temporary_sidecar.replace(sidecar_path)
             sidecar_published = True
+            temporary_archive.replace(archive_path)
+            archive_published = True
         except BaseException:
             if sidecar_published:
                 sidecar_path.unlink(missing_ok=True)
