@@ -240,3 +240,12 @@ recorded 504 evaluations because the final parallel wave was already in
 flight. GEPA promoted a candidate that improved validation from 44.44% to
 51.11%; frozen and selected prompts both scored 43.33% on the sealed test
 split, so the held-out delta is reported as 0.
+
+The full Reef seed-0
+[`results/reef-full-2026-09-01`](results/reef-full-2026-09-01/README.md)
+run completed the frozen, rules-only, and multi-node cells for an estimated
+$12.0755836.
+Rules-only improved validation from 26.67% to 40.00% and held-out from 43.33%
+to 46.67%. Multi-node improved validation from 28.89% to 40.00%, tied its
+independently sampled 33.33% frozen held-out score, and exercised a candidate
+that composed changes to both named nodes.

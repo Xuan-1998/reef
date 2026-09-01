@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "run_kind": "reef_full",
+  "completed_at": "2026-09-01T07:53:14Z",
+  "source": {
+    "reef_source_commit": "fb65221d299e1d8fbf6c66b8a5ce0d61f46f6f02",
+    "reef_source_url": "https://github.com/Human-Agent-Society/reef/commit/fb65221d299e1d8fbf6c66b8a5ce0d61f46f6f02",
+    "reef_source_dirty": false,
+    "gepa_commit": "67da814e33328e6714c3636428d03c86adb66cd7",
+    "gepa_source_url": "https://github.com/gepa-ai/gepa/commit/67da814e33328e6714c3636428d03c86adb66cd7",
+    "pi_version": "0.84.2"
+  },
+  "configuration": {
+    "cells": [
+      "frozen",
+      "rules",
+      "multi"
+    ],
+    "seed": 0,
+    "search_metric_call_budget": 500,
+    "search_workers": 32,
+    "heldout_workers": 16,
+    "skip_perfect_score": false,
+    "task_model": "gpt-4.1-mini-2025-04-14",
+    "reflection_model": "gpt-5.1-2025-11-13",
+    "max_observed_cost_usd": 29.7
+  },
+  "dataset": {
+    "source": "gepa examples/aime_math/utils.py::load_math_dataset()",
+    "train_revision": "13f9e12f613e720c2a2b2f345dd04b998a29494d",
+    "test_revision": "c94da77eb22bbd6439e62a323bec18493a421302",
+    "sha256": "0ee1433b0a5ecc4e7875004af026662a9137eb6ff30b8ffb081f139713e9c2e9",
+    "sizes": {
+      "train": 45,
+      "validation": 45,
+      "test": 30
+    }
+  },
+  "outcomes": {
+    "frozen": {
+      "test_score": 0.43333333333333335,
+      "task_usage": {
+        "requests": 44,
+        "input_tokens": 65713,
+        "cached_input_tokens": 19840,
+        "output_tokens": 107444,
+        "reasoning_tokens": 0
+      },
+      "estimated_cost_usd": 0.19224360000000004,
+      "wall_time_s": 293.43717
+    },
+    "rules": {
+      "total_metric_calls": 546,
+      "num_registered_candidates": 10,
+      "selected_candidate_index": 5,
+      "seed_validation_score": 0.26666666666666666,
+      "selected_validation_score": 0.4,
+      "validation_delta": 0.13333333333333336,
+      "promoted": true,
+      "promotion_reason": "candidate 5 strictly improved aggregate validation score from 0.266667 to 0.400000",
+      "frozen_test_score": 0.43333333333333335,
+      "selected_test_score": 0.4666666666666667,
+      "test_delta": 0.033333333333333326,
+      "heldout_items_with_different_correctness": 7,
+      "task_usage": {
+        "requests": 642,
+        "input_tokens": 2124062,
+        "cached_input_tokens": 67968,
+        "output_tokens": 2457181,
+        "reasoning_tokens": 0
+      },
+      "reflection_usage": {
+        "requests": 16,
+        "input_tokens": 439627,
+        "cached_input_tokens": 13952,
+        "output_tokens": 45162,
+        "reasoning_tokens": 0
+      },
+      "estimated_task_cost_usd": 4.760724,
+      "estimated_reflection_cost_usd": 0.98545775,
+      "estimated_total_cost_usd": 5.74618175,
+      "wall_time_s": 4993.090503459098
+    },
+    "multi": {
+      "total_metric_calls": 513,
+      "num_registered_candidates": 7,
+      "selected_candidate_index": 2,
+      "selected_components_changed": [
+        "rules"
+      ],
+      "seed_validation_score": 0.28888888888888886,
+      "selected_validation_score": 0.4,
+      "validation_delta": 0.11111111111111116,
+      "promoted": true,
+      "promotion_reason": "candidate 2 strictly improved aggregate validation score from 0.288889 to 0.400000",
+      "cross_node_candidate": {
+        "candidate_index": 5,
+        "parent_index": 2,
+        "components_changed_from_seed": [
+          "rules",
+          "skill"
+        ],
+        "validation_score": 0.35555555555555557
+      },
+      "frozen_test_score": 0.3333333333333333,
+      "selected_test_score": 0.3333333333333333,
+      "test_delta": 0.0,
+      "heldout_items_with_different_correctness": 6,
+      "task_usage": {
+        "requests": 623,
+        "input_tokens": 1919351,
+        "cached_input_tokens": 89600,
+        "output_tokens": 2278126,
+        "reasoning_tokens": 0
+      },
+      "reflection_usage": {
+        "requests": 33,
+        "input_tokens": 821517,
+        "cached_input_tokens": 9600,
+        "output_tokens": 73520,
+        "reasoning_tokens": 0
+      },
+      "estimated_task_cost_usd": 4.385862,
+      "estimated_reflection_cost_usd": 1.75129625,
+      "estimated_total_cost_usd": 6.137158250000001,
+      "wall_time_s": 7315.976285708952
+    }
+  },
+  "publications": {
+    "frozen": {
+      "candidate_sha256": "d35550805f67c67543c7b506c89e18aab9793a896725eb659cab444175394718",
+      "render_sha256": "8962b52fc9dbc4765c32547bd38d641eb863377dca745f4309dcb596e70ea7b2",
+      "content_id": "content:3a594ca25c0241979730aab9a95fbcf0",
+      "release_id": "54154e17eecbdd61e2a6cf8568fc4c9993b30f89",
+      "parent_release_id": "11a4e8f8c890de79054ddedb9e43f3815f2180d4",
+      "files": [
+        "pi-agent/AGENTS.md",
+        "pi-agent/models.json",
+        "pi-agent/settings.json",
+        "pi-agent/skills/aime-solver/SKILL.md"
+      ]
+    },
+    "rules": {
+      "candidate_sha256": "9217c4d79942cb921a59e116503160c63414a1ec131395f03aecd88020d12d40",
+      "render_sha256": "625ee03164d736c3c2e11839f17fb2a23629785bbc7239e37835f7e076c55655",
+      "content_id": "content:4806fe5da6c34b069b2a02cb67144f29",
+      "release_id": "c526838ab571ee5b4559f279f6bd812b2c45c2cb",
+      "parent_release_id": "42e6ff8dce33170d8a5202f8bfc24308eaa811f7",
+      "files": [
+        "pi-agent/AGENTS.md",
+        "pi-agent/models.json",
+        "pi-agent/settings.json"
+      ]
+    },
+    "multi": {
+      "candidate_sha256": "b651f93106c0fae436fcbc2fbc328c9cae451304d48937538d83036161b9402a",
+      "render_sha256": "d7985b30bfb88538e1aef7cd6a1074268069bb55a1967b7ee246d713636c4d82",
+      "content_id": "content:4429382aa9d0405da78c38e800ab5468",
+      "release_id": "3fa429f5b1ae658397b890af9c084eaa82f50d21",
+      "parent_release_id": "0c4588eb39cb8100effacf194a520dcf25564f45",
+      "files": [
+        "pi-agent/AGENTS.md",
+        "pi-agent/models.json",
+        "pi-agent/settings.json",
+        "pi-agent/skills/aime-solver/SKILL.md"
+      ]
+    }
+  },
+  "shared_spend_guard": {
+    "completed_calls": 1258,
+    "max_observed_cost_usd": 29.7,
+    "observed_cost_usd": 12.075583600000012
+  },
+  "run_identity_sha256": "1d586f41f34bd3ee6dfc9b5fd8bb4f0c136e18a6bb8d7a9db325048b012a7989",
+  "source_file_sha256": {
+    "dataset-manifest.json": "0927ceab184ee6002d23dc4c6f86cda66bea0acb169c06d295871c9f0b3d560d",
+    "run-identity.json": "fe4e0b38ca3de9deac75e872e568bf55fa7ab9fefcc2911173dee5a6499b82e4",
+    "observed-cost.json": "29d49f004cfaa02d22b025e2abf9237bd80cf0b3dbf282c028e23c81b8dfdda6",
+    "plan.json": "a6877540b3548df38a37eb69bbc1393f87534854b1cdfdfc93e5e65d03270640",
+    "results.json": "dae7d4f877e1ae88c4ba5576408dec0c092bfadab8ab70137f27279382ccb4bd",
+    "frozen/seed-0/config.json": "9f0c7b78971d945b03f2d964287c712787cdc002763507ce09d54a6ce9d449a8",
+    "frozen/seed-0/summary.json": "e549eec7a51ed1a3edd895c963973dbd5451d2f138eeede150ff9290375bcfb6",
+    "frozen/seed-0/publication.json": "78ae4464f9ae461e58fefe18cd2715553d4e1ed67ca96844809082282a13daf3",
+    "frozen/seed-0/done.json": "6bcb7458f3a5aa15d27461baaa735d2edce8a72106a2e2cb635eb35f5d488e22",
+    "rules/seed-0/config.json": "bce20e6f8f040309c417c11d63e41960601d93d2d9828a512715b802387e28ca",
+    "rules/seed-0/summary.json": "f940ca9648b889453bf319b2a0297a3b1160e78d53a3f11dbf98d831ebd39e58",
+    "rules/seed-0/publication.json": "1d858f6bdd58250393241edf7e9224746f682da3cb3677d028c9dff3d6845ded",
+    "rules/seed-0/done.json": "92ea4981d5379e134d651510400168d67f956cba00b394361b325b76ae02ff03",
+    "rules/seed-0/raw_result.json": "633ccd429eb2c93fc3a6233ab9499911ca67d35a14e6129060f98e029565fb68",
+    "rules/seed-0/selected_candidate.json": "ee170971c7e3224545dd7762260171dd6a7ddb5faf0bc39ef57c06569736ad4a",
+    "multi/seed-0/config.json": "da4d058859b280766a26134513be20527659ce7a3ca6977408f111a8c316a25e",
+    "multi/seed-0/summary.json": "f00da693fe9f12e807dc7ae52fe6c96dce2ecdc800840fddcacc317dfb6a8e1d",
+    "multi/seed-0/publication.json": "0ecd2ef47b83e3a9b6ac78107e2f4a3c1e3f6aa90a2fadfdda37b59d687be3e0",
+    "multi/seed-0/done.json": "193d0a54ee2947a0ae98107bc434f593823a7df054222792d94f5cbd3dfeb1a9",
+    "multi/seed-0/raw_result.json": "377f083416019cd290a9e3ded76196c4e7921f04bf073ed61f361d712d803611",
+    "multi/seed-0/selected_candidate.json": "bfed3fa10dbef43469886da58fff84c5e43e13a0d35b9d5aa142ef4ecd89821e"
+  },
+  "limitations": [
+    "This is one stochastic seed and does not estimate variance across runs.",
+    "The direct official cell and Reef Pi cells use different solver interfaces, so raw score equality is not expected.",
+    "Independent Pi held-out passes are stochastic and should not be treated as deterministic repeats.",
+    "The experiment evolves text in a fixed composition topology and does not evolve executable code or topology."
+  ]
+}
