@@ -81,9 +81,9 @@ jobs:
       - run: >
           python -m pip install
           "gepa @ git+https://github.com/gepa-ai/gepa.git@67da814e33328e6714c3636428d03c86adb66cd7"
-          "datasets>=2.14.6"
-          "dspy>=3.0.0"
-          "litellm>=1.83.0,<1.92"
+          "datasets==5.0.1"
+          "dspy==3.3.1"
+          "litellm==1.91.5"
       # Install the pinned training runtime without its GPU dependencies: the
       # tests need it importable, not its GPU stack, and the
       # full requirements pull CUDA torch and the nvidia wheels, which
