@@ -38,6 +38,7 @@ from reef.runtime.names import DEFAULT_ACTOR_NAME, DEFAULT_NAMESPACE
 from reef.surface.adapter import parse_adapter_name
 from reef.train.slime_backend.algorithm import SlimeAlgorithm
 from reef.train.slime_backend.data_builder import to_slime_rollout_data
+from reef.train.algos.registry import loss_family_refs
 from reef.train.slime_backend.loss_families import resolve_loss_family
 from reef.train.slime_backend.reef_adapters.preflight import (
     configure_megatron_runtime,
@@ -1139,6 +1140,12 @@ def start_bridge(
     """
     spec = resolve_loss_family(loss_family) if loss_family is not None else None
     validate_bridge_args(args, spec)
+    # Ship a resolvable reference to the actor: the bridge actor boots in a
+    # fresh process whose family registry is empty, so a plain external name
+    # like "tttd" cannot resolve there. The dotted reference can: resolve()
+    # imports it and registers it under its canonical name.
+    if loss_family is not None and ":" not in loss_family:
+        loss_family = loss_family_refs().get(loss_family) or loss_family
     configure_sglang_runtime(args)
     configure_megatron_runtime(args)
     configure_rollout_runtime(args)
