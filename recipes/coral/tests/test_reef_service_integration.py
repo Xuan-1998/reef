@@ -91,7 +91,9 @@ async def _post_through(mw, scope, body: bytes):
 @pytest.mark.unit
 def test_full_loop_against_real_reef_service(tmp_path):
     async def run():
-        reef_client = TestClient(TestServer(reef_service.create_app(build_default_dispatcher(), inference_backend=_EchoBackend())))
+        reef_client = TestClient(
+            TestServer(reef_service.create_app(build_default_dispatcher(), inference_backend=_EchoBackend()))
+        )
         await reef_client.start_server()
         try:
             journal = AttributionJournal(tmp_path / "attribution.jsonl")
@@ -126,19 +128,25 @@ def test_full_loop_against_real_reef_service(tmp_path):
             )
             assert report.references == (record.agent_record_id,)
 
-            first = await reef_client.post("/reef/report", json=report.payload(), headers={"x-reef-scenario": "coral-demo"})
+            first = await reef_client.post(
+                "/reef/report", json=report.payload(), headers={"x-reef-scenario": "coral-demo"}
+            )
             assert first.status == 200
             echoed = (await first.json())["agent_record_id"]
 
             # duplicate grader run: identical resend dedups, no double count
-            retry = await reef_client.post("/reef/report", json=report.payload(), headers={"x-reef-scenario": "coral-demo"})
+            retry = await reef_client.post(
+                "/reef/report", json=report.payload(), headers={"x-reef-scenario": "coral-demo"}
+            )
             assert retry.status == 200
             assert (await retry.json())["agent_record_id"] == echoed
 
             # conflicting resend (same id, different score) must be rejected
             conflicting = dict(report.payload())
             conflicting["score"] = 0.1
-            conflict = await reef_client.post("/reef/report", json=conflicting, headers={"x-reef-scenario": "coral-demo"})
+            conflict = await reef_client.post(
+                "/reef/report", json=conflicting, headers={"x-reef-scenario": "coral-demo"}
+            )
             assert conflict.status == 409
         finally:
             await reef_client.close()
