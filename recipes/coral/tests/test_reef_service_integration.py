@@ -18,13 +18,13 @@ import pytest
 
 reef_service = pytest.importorskip("reef.service.app", reason="requires a reef checkout")
 
-from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
+from aiohttp.test_utils import TestClient, TestServer
 
-from reef.dispatcher import build_default_dispatcher  # noqa: E402
-from reef.runtime.inference import InferenceBackend  # noqa: E402
-from reef_coral.attribution import AttributionJournal  # noqa: E402
-from reef_coral.middleware import ReefAttributionMiddleware  # noqa: E402
-from reef_coral.reporter import build_report  # noqa: E402
+from reef.dispatcher import build_default_dispatcher
+from reef.runtime.inference import InferenceBackend
+from reef_coral.attribution import AttributionJournal
+from reef_coral.middleware import ReefAttributionMiddleware
+from reef_coral.reporter import build_report
 
 
 class _EchoBackend(InferenceBackend):
