@@ -30,6 +30,10 @@ class AttributionRecord:
     path: str
     status_code: int
     agent_record_id: str | None = None
+    #: ``x-reef-release-id`` from the response: which serving revision answered.
+    release_id: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     tags: dict[str, str] = field(default_factory=dict)
 
     def to_json(self) -> str:
