@@ -36,9 +36,9 @@ from reef.runtime.adapter_residency import AdapterResidencyManager
 from reef.runtime.base import PreparedTrainingStep, TrainingJobResult
 from reef.runtime.names import DEFAULT_ACTOR_NAME, DEFAULT_NAMESPACE
 from reef.surface.adapter import parse_adapter_name
+from reef.train.algos.registry import loss_family_refs
 from reef.train.slime_backend.algorithm import SlimeAlgorithm
 from reef.train.slime_backend.data_builder import to_slime_rollout_data
-from reef.train.algos.registry import loss_family_refs
 from reef.train.slime_backend.loss_families import resolve_loss_family
 from reef.train.slime_backend.reef_adapters.preflight import (
     configure_megatron_runtime,
