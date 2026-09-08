@@ -84,20 +84,20 @@ def wait_for_training(expected: int) -> None:
     while time.time() < deadline:
         trained = training_release_count()
         if trained == _SERVICE_GONE:
-            print("    WARNING: the Reef service is not reachable; skipping the training drain")
+            print("    WARNING: the Reef service is not reachable; skipping the training drain", flush=True)
             return
         if trained is not None and trained >= expected:
-            print(f"    trained: {trained}/{expected} rollouts committed")
+            print(f"    trained: {trained}/{expected} rollouts committed", flush=True)
             return
         time.sleep(10)
-    print(f"    WARNING: only {trained}/{expected} rollouts trained within {TRAIN_DRAIN_TIMEOUT_S}s")
+    print(f"    WARNING: only {trained}/{expected} rollouts trained within {TRAIN_DRAIN_TIMEOUT_S}s", flush=True)
 
 
 async def main():
     lab = Lab(HERE / "work" / "lab")
     for position, name in enumerate(TASKS):
         row = await lab.run(str(HERE / "harbor" / name), AGENT, tags={"position": position})
-        print(f"[{position}] {name}: reward {row.rewards}")
+        print(f"[{position}] {name}: reward {row.rewards}", flush=True)
         wait_for_training(expected=(position + 1) * ROLLOUTS)
 
 
