@@ -1,0 +1,14 @@
+title: Antigravity
+command: >-
+  A person types an agent_command in the session. Its text is passed to Antigravity via the CLI prompt.
+tools: >-
+  RunCommand, ReadFile, WriteFile, SearchFiles, WebSearch. Antigravity discovers plugins automatically from the plugins directory.
+conversation_mode:
+  name: Antigravity
+  skill: >-
+    Antigravity loads skills from plugins and skills directories.
+  escape: >-
+    Antigravity executes commands securely.
+config_keys: [trustedWorkspaces]
+config_example: >-
+  {"target": "primary", "data": {"trustedWorkspaces": ["/path/to/workspace"]}} allows Antigravity to operate in that directory.

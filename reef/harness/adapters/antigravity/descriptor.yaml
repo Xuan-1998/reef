@@ -1,0 +1,32 @@
+# Antigravity (agy), driven headless per episode.
+name: antigravity
+binary: agy
+argv: ["--dangerously-skip-permissions", "--output-format", "json", "-p", "{prompt}"]
+env:
+  HOME: "{root}/home"
+  XDG_CONFIG_HOME: "{root}/xdg-config"
+  XDG_DATA_HOME: "{root}/xdg-data"
+  XDG_CACHE_HOME: "{root}/xdg-cache"
+  AGY_CLI_DISABLE_AUTO_UPDATE: "1"
+  AGY_CLI_DISABLE_TELEMETRY: "1"
+
+files:
+  config:
+    primary:
+      path: "home/.gemini/antigravity-cli/settings.json"
+      defaults:
+        trustedWorkspaces: ["{root}"]
+  rules: "home/.gemini/antigravity-cli/plugins/reef/rules/AGENTS.md"
+  skill: "home/.gemini/antigravity-cli/plugins/reef/skills/{name}/SKILL.md"
+
+trajectory:
+  format: jsonl
+  path: "home/.gemini/antigravity-cli/brain"
+
+cleanup_whitelist:
+  - "home/**"
+  - "xdg-config/**"
+  - "xdg-data/**"
+  - "xdg-cache/**"
+
+quirks: reef.harness.adapters.antigravity.quirks
